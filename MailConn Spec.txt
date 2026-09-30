@@ -1,0 +1,879 @@
+You are building a personal single-user Microsoft 365 connector for Reinier's Morning Intelligence Brief.
+
+Read the complete technical specification below before writing code.
+
+The application will run on Cloudflare Workers and communicate with Microsoft Graph using delegated OAuth access to Reinier's own Microsoft 365 account.
+
+The application is NOT a general-purpose email product.
+
+Its purpose is to provide a reliable, private bridge between Microsoft 365 and Reinier's Morning Brief.
+
+---
+
+# IMPORTANT DEVELOPMENT RULES
+
+1. Build this as a production-quality application, not a demonstration.
+
+2. Use TypeScript.
+
+3. Use Cloudflare Workers.
+
+4. Use Cloudflare D1 for persistent relational state.
+
+5. Use Cloudflare Worker Secrets for credentials and secrets.
+
+6. Use Cloudflare Cron Triggers for scheduled synchronisation.
+
+7. Use Microsoft Graph API.
+
+8. Use delegated OAuth authorization.
+
+9. The application is for ONE Microsoft account only.
+
+10. Do NOT implement multi-user functionality.
+
+11. Do NOT request Microsoft `Mail.Send`.
+
+12. The application must NEVER send email.
+
+13. The application may create Outlook email drafts.
+
+14. The application may create/update calendar events only when explicitly requested through an authenticated API request.
+
+15. Do NOT automatically create calendar events because an email mentions a meeting.
+
+16. Do NOT automatically turn emails into tasks or Master Actions.
+
+17. Do NOT store secrets in GitHub.
+
+18. Do NOT log access tokens, refresh tokens, email bodies or private calendar bodies.
+
+19. Never interpret an incomplete Microsoft Graph response as an empty result.
+
+20. Reliability and completeness detection are core requirements, not optional features.
+
+---
+
+# DEVELOPMENT APPROACH
+
+Do NOT attempt to build everything in one uncontrolled step.
+
+Work through these phases.
+
+After each phase:
+
+- run the relevant tests;
+- fix errors;
+- explain what was completed;
+- identify exactly what I need to do manually;
+- then proceed to the next phase only when the phase is working.
+
+I am not highly technical.
+
+Therefore:
+
+- explain setup instructions simply;
+- give exact commands;
+- give exact file names;
+- never say "configure this appropriately";
+- never assume I know where something is in Cloudflare or Microsoft;
+- if I must copy a value from Microsoft into Cloudflare, explicitly say where it comes from and where it goes.
+
+---
+
+# PHASE 1 — PROJECT FOUNDATION
+
+Create the project.
+
+Use:
+
+```text
+morning-brief-connector
+```
+
+Create:
+
+```text
+src/
+migrations/
+tests/
+```
+
+Create:
+
+```text
+package.json
+tsconfig.json
+wrangler.jsonc
+.gitignore
+README.md
+SETUP.md
+ARCHITECTURE.md
+SECURITY.md
+API.md
+TESTING.md
+TROUBLESHOOTING.md
+```
+
+Use a clean modular architecture.
+
+Suggested structure:
+
+```text
+src/
+├── index.ts
+├── auth/
+│   ├── oauth.ts
+│   ├── state.ts
+│   └── tokens.ts
+├── microsoft/
+│   ├── graph.ts
+│   ├── email.ts
+│   └── calendar.ts
+├── api/
+│   ├── auth.ts
+│   ├── email.ts
+│   ├── calendar.ts
+│   ├── drafts.ts
+│   ├── brief.ts
+│   ├── health.ts
+│   └── status.ts
+├── sync/
+│   ├── email-sync.ts
+│   ├── calendar-sync.ts
+│   └── checkpoints.ts
+├── validation/
+│   ├── completeness.ts
+│   └── schemas.ts
+├── database/
+│   ├── db.ts
+│   └── repositories.ts
+└── security/
+    ├── api-auth.ts
+    └── logging.ts
+```
+
+Do not add unnecessary frameworks.
+
+---
+
+# PHASE 2 — D1 DATABASE
+
+Create the D1 migrations.
+
+Tables:
+
+## sync_state
+
+```text
+id
+source
+last_attempt_at
+last_success_at
+last_success_cursor
+status
+error_code
+error_message
+messages_checked
+events_checked
+pages_checked
+pagination_complete
+updated_at
+```
+
+## email_messages
+
+```text
+id
+graph_message_id
+conversation_id
+internet_message_id
+received_at
+sender_email
+sender_name
+subject
+is_read
+importance
+has_attachments
+classification
+body_preview
+web_link
+first_seen_at
+last_seen_at
+```
+
+Make `graph_message_id` unique.
+
+## calendar_events
+
+```text
+id
+graph_event_id
+subject
+start_at
+end_at
+timezone
+location
+organiser
+response_status
+is_cancelled
+body_preview
+first_seen_at
+last_seen_at
+```
+
+Make `graph_event_id` unique.
+
+## audit_log
+
+```text
+id
+timestamp
+operation
+resource_type
+resource_id
+result
+requested_by
+details_json
+```
+
+Create proper indexes.
+
+Create migration scripts.
+
+---
+
+# PHASE 3 — MICROSOFT OAUTH
+
+Implement Microsoft OAuth authorization-code flow.
+
+Endpoints:
+
+```text
+GET /auth/login
+GET /auth/callback
+GET /auth/logout
+```
+
+Required delegated permissions:
+
+```text
+openid
+profile
+email
+offline_access
+User.Read
+Mail.Read
+Mail.ReadWrite
+Calendars.ReadWrite
+```
+
+Do NOT request:
+
+```text
+Mail.Send
+```
+
+Use secure random OAuth state.
+
+Validate state on callback.
+
+Exchange authorization code for tokens.
+
+Refresh tokens when required.
+
+Retrieve `/me` after authentication.
+
+Store the authenticated Microsoft account identity.
+
+Do not trust account identity supplied by the client.
+
+---
+
+# PHASE 4 — MICROSOFT GRAPH CLIENT
+
+Create a reusable Microsoft Graph client.
+
+Requirements:
+
+- automatic Authorization header;
+- token refresh;
+- Graph error handling;
+- timeout handling;
+- retry handling for transient failures;
+- rate-limit handling;
+- request IDs for diagnostics;
+- no sensitive data in logs.
+
+Do not create a generic arbitrary Graph proxy.
+
+Only expose the Graph operations required by this application.
+
+---
+
+# PHASE 5 — EMAIL RETRIEVAL
+
+Implement reliable email retrieval.
+
+Retrieve:
+
+- message ID;
+- conversation ID;
+- received date/time;
+- sender;
+- recipients;
+- subject;
+- read state;
+- importance;
+- attachments;
+- body preview;
+- web link.
+
+Implement pagination completely.
+
+If Graph returns a next-page URL, follow it.
+
+Continue until there is no next page.
+
+Record:
+
+```text
+pages_checked
+messages_checked
+pagination_complete
+```
+
+If any page fails:
+
+```text
+status = partial
+pagination_complete = false
+```
+
+Do NOT return success.
+
+---
+
+# PHASE 6 — EMAIL SYNC
+
+Implement checkpoint-based synchronisation.
+
+Store the last successful sync.
+
+Use a safety overlap window.
+
+Do not rely only on a timestamp to prevent duplicates.
+
+Deduplicate using Graph message ID.
+
+A successful sync updates the checkpoint.
+
+A failed or partial sync does NOT replace the last successful checkpoint.
+
+A failed sync must not erase previously stored email data.
+
+---
+
+# PHASE 7 — CALENDAR RETRIEVAL
+
+Implement:
+
+```text
+GET /calendar
+```
+
+Support:
+
+```text
+from
+to
+```
+
+Retrieve:
+
+- event ID;
+- subject;
+- start;
+- end;
+- timezone;
+- location;
+- organiser;
+- attendees;
+- response status;
+- cancellation status;
+- body preview.
+
+Implement complete pagination.
+
+Apply the same reliability rules as email.
+
+---
+
+# PHASE 8 — DRAFT EMAILS
+
+Implement:
+
+```text
+POST /drafts
+POST /drafts/reply
+```
+
+Use Microsoft Graph draft creation.
+
+Do NOT implement sending.
+
+There must be no:
+
+```text
+/send
+```
+
+endpoint.
+
+Do not request `Mail.Send`.
+
+Test that the resulting message appears in Outlook Drafts.
+
+---
+
+# PHASE 9 — CALENDAR WRITE OPERATIONS
+
+Implement:
+
+```text
+POST /calendar/events
+PATCH /calendar/events/:id
+```
+
+Require authenticated API access.
+
+Validate:
+
+- subject;
+- start;
+- end;
+- timezone.
+
+Use Microsoft Graph `Calendars.ReadWrite`.
+
+Do not implement event deletion in v1.
+
+Before updating an event:
+
+1. retrieve it;
+2. verify its ID;
+3. perform the update;
+4. record the result in audit_log.
+
+---
+
+# PHASE 10 — API SECURITY
+
+Protect private API endpoints.
+
+Use:
+
+```text
+Authorization: Bearer <CONNECTOR_API_TOKEN>
+```
+
+Store the API token as a Cloudflare secret.
+
+Do not expose it in frontend code.
+
+Do not allow unauthenticated access to:
+
+```text
+/email
+/calendar
+/drafts
+/brief
+/status
+```
+
+`/health` may expose only non-sensitive service health.
+
+---
+
+# PHASE 11 — RELIABILITY ENGINE
+
+This is one of the most important parts of the application.
+
+Create a common retrieval result structure:
+
+```typescript
+type RetrievalStatus =
+  | "complete"
+  | "partial"
+  | "failed"
+  | "unauthorized"
+  | "rate_limited"
+  | "source_unavailable";
+```
+
+Every retrieval must return:
+
+```text
+status
+items
+itemsChecked
+pagesChecked
+paginationComplete
+startedAt
+completedAt
+error
+```
+
+Never return:
+
+```text
+[]
+```
+
+without a status explaining whether the empty result is genuine.
+
+Example:
+
+```json
+{
+  "status": "complete",
+  "items": [],
+  "itemsChecked": 0,
+  "paginationComplete": true
+}
+```
+
+is valid.
+
+But:
+
+```json
+{
+  "status": "partial",
+  "items": [],
+  "paginationComplete": false
+}
+```
+
+means:
+
+"we don't know whether there were additional messages."
+
+---
+
+# PHASE 12 — FAILURE RETENTION
+
+Implement this rule:
+
+If the current sync fails:
+
+```text
+DO NOT DELETE OLD DATA.
+DO NOT RESET THE CHECKPOINT.
+DO NOT REPORT ZERO RESULTS.
+```
+
+Instead:
+
+```text
+retain previous successful state
+record failure
+set current status = failed
+```
+
+The Morning Brief must be able to see that the latest scan failed.
+
+---
+
+# PHASE 13 — MORNING BRIEF ENDPOINT
+
+Implement:
+
+```text
+GET /brief
+```
+
+It should return:
+
+```json
+{
+  "generated_at": "...",
+  "source_status": {
+    "overall": "complete",
+    "email": "complete",
+    "calendar": "complete"
+  },
+  "email": {
+    "new_messages": [],
+    "important_messages": [],
+    "marketing_messages": [],
+    "unread_messages": []
+  },
+  "calendar": {
+    "today": [],
+    "next_7_days": []
+  },
+  "warnings": []
+}
+```
+
+If anything is incomplete, include a warning.
+
+Example:
+
+```json
+{
+  "source_status": {
+    "overall": "incomplete",
+    "email": "partial",
+    "calendar": "complete"
+  },
+  "warnings": [
+    "Email retrieval was incomplete. Results must not be interpreted as a complete mailbox scan."
+  ]
+}
+```
+
+---
+
+# PHASE 14 — CRON
+
+Implement Cloudflare `scheduled()`.
+
+The scheduled task must:
+
+1. refresh authentication;
+2. sync email;
+3. sync calendar;
+4. validate completeness;
+5. save successful results;
+6. retain previous data on failure;
+7. record sync state;
+8. expose the latest state through `/brief`.
+
+Use UTC in the Cron configuration.
+
+Document the conversion to South African time.
+
+---
+
+# PHASE 15 — HEALTH
+
+Implement:
+
+```text
+GET /health
+GET /status
+GET /version
+```
+
+Health must show:
+
+```text
+Microsoft authentication
+Email status
+Calendar status
+Last successful email sync
+Last successful calendar sync
+Last error
+Application version
+```
+
+Never expose tokens or sensitive mailbox contents.
+
+---
+
+# PHASE 16 — TESTS
+
+Create automated tests for:
+
+### OAuth
+
+- invalid state;
+- successful callback;
+- expired token;
+- refresh;
+- failed authentication.
+
+### Email
+
+- empty mailbox;
+- one page;
+- multiple pages;
+- pagination failure;
+- duplicate message;
+- timeout;
+- rate limiting;
+- Graph error.
+
+### Calendar
+
+- empty calendar;
+- one page;
+- multiple pages;
+- pagination failure;
+- cancelled event;
+- timezone.
+
+### Drafts
+
+- create draft;
+- reply draft;
+- validation failure;
+- Graph failure.
+
+### Calendar writes
+
+- create event;
+- update event;
+- validation failure;
+- Graph failure.
+
+### Critical reliability test
+
+Simulate:
+
+```text
+page 1 succeeds
+page 2 exists
+page 2 fails
+```
+
+Expected:
+
+```text
+status = partial
+paginationComplete = false
+```
+
+Never:
+
+```text
+status = complete
+```
+
+### Critical data-retention test
+
+Simulate:
+
+```text
+previous sync succeeds
+new sync fails
+```
+
+Expected:
+
+```text
+previous data retained
+previous successful checkpoint retained
+current status = failed
+```
+
+---
+
+# PHASE 17 — DOCUMENTATION
+
+Write complete documentation.
+
+README:
+
+- what the connector does;
+- architecture;
+- quick start.
+
+SETUP:
+
+Explain every manual step.
+
+Include exact instructions for:
+
+### Microsoft
+
+- open Microsoft Entra;
+- create app registration;
+- enter redirect URI;
+- select supported account type;
+- add delegated Graph permissions;
+- obtain client ID;
+- create client secret if required;
+- copy values.
+
+### Cloudflare
+
+- create Worker;
+- create D1 database;
+- configure bindings;
+- configure secrets;
+- deploy;
+- configure Cron.
+
+Use placeholders rather than putting real credentials in documentation.
+
+---
+
+# PHASE 18 — FINAL VALIDATION
+
+Before declaring the project complete, run:
+
+```text
+npm test
+npm run build
+npx wrangler deploy --dry-run
+```
+
+if supported by the project configuration.
+
+Check:
+
+```text
+git status
+```
+
+Confirm no secrets are tracked.
+
+Search the repository for:
+
+```text
+CLIENT_SECRET
+ACCESS_TOKEN
+REFRESH_TOKEN
+API_TOKEN
+```
+
+and confirm no real credentials exist.
+
+---
+
+# IMPORTANT USER EXPERIENCE
+
+I am not a highly technical developer.
+
+Whenever you need me to perform a manual step:
+
+1. Stop.
+2. Tell me exactly what screen to open.
+3. Tell me exactly what to click.
+4. Tell me exactly what value to copy.
+5. Tell me exactly where to paste it.
+6. Tell me how to verify the result.
+7. Only then continue.
+
+Do not give me ten unrelated manual setup tasks at once.
+
+---
+
+# FIRST TASK
+
+Start with PHASE 1 only.
+
+Create the project structure and configuration.
+
+Do not attempt Microsoft authentication yet.
+
+After Phase 1:
+
+- show me the files created;
+- show me the commands I must run;
+- run the tests/build;
+- report any errors;
+- then wait for my instruction to continue.

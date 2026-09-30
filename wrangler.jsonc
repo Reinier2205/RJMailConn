@@ -1,0 +1,69 @@
+{
+  // Cloudflare Workers configuration for Morning Brief Connector
+  "name": "morning-brief-connector",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-01-15",
+  "compatibility_flags": ["nodejs_compat"],
+  
+  // Environment configuration
+  "vars": {
+    "ENVIRONMENT": "production"
+  },
+  
+  // D1 Database bindings
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "morning-brief-db",
+      "database_id": "REPLACE_WITH_ACTUAL_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  
+  // Cron triggers for scheduled synchronization
+  "triggers": {
+    "crons": [
+      "0 6 * * *"  // Daily at 6:00 AM UTC (8:00 AM SAST)
+    ]
+  },
+  
+  // Build configuration
+  "build": {
+    "command": "npm run build"
+  },
+  
+  // Development configuration
+  "dev": {
+    "ip": "localhost",
+    "port": 8787,
+    "local_protocol": "http"
+  },
+  
+  // Environment-specific configurations
+  "env": {
+    "development": {
+      "vars": {
+        "ENVIRONMENT": "development"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "morning-brief-db-dev",
+          "database_id": "REPLACE_WITH_DEV_DATABASE_ID"
+        }
+      ]
+    },
+    "staging": {
+      "vars": {
+        "ENVIRONMENT": "staging"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "morning-brief-db-staging", 
+          "database_id": "REPLACE_WITH_STAGING_DATABASE_ID"
+        }
+      ]
+    }
+  }
+}

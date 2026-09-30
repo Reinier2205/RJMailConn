@@ -1,0 +1,48 @@
+{
+  "name": "morning-brief-connector",
+  "version": "1.0.0",
+  "description": "Production-quality Microsoft 365 connector for Reinier's Morning Intelligence Brief",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "build": "tsc",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "format": "prettier --write src/**/*.ts",
+    "type-check": "tsc --noEmit",
+    "db:migrate": "wrangler d1 migrations apply morning-brief-db",
+    "db:migrate:local": "wrangler d1 migrations apply morning-brief-db --local"
+  },
+  "keywords": [
+    "microsoft-365",
+    "outlook",
+    "calendar",
+    "cloudflare-workers",
+    "oauth",
+    "morning-brief"
+  ],
+  "author": "Reinier",
+  "license": "MIT",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20231218.0",
+    "@types/node": "^20.10.5",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.1.2",
+    "prettier": "^3.1.1",
+    "typescript": "^5.3.3",
+    "vitest": "^1.1.0",
+    "@vitest/coverage-v8": "^1.1.0",
+    "wrangler": "^3.22.1"
+  },
+  "dependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

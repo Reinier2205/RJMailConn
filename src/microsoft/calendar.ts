@@ -1,10 +1,65 @@
-/**
+﻿/**
  * Calendar Event Endpoints - Calendar Event Management
  * 
  * Provides secure endpoints for creating and updating calendar events
  * with proper validation and audit logging.
  */
 
+import { Environment } from "../index";
+import { GraphClient } from "../microsoft/graph";
+import { auditLog } from "../database/audit";
+import { 
+  validateSubject, 
+  validateDateTime, 
+  validateEventTiming, 
+  CalendarValidationError,
+  isValidTimezone
+} from "../validation/calendar";
+
+
+/**
+ * Calendar event database model (matches database schema)
+ */
+export interface CalendarEvent {
+  /** Internal database ID */
+  id: string;
+  
+  /** Unique Microsoft Graph event ID */
+  graph_event_id: string;
+  
+  /** Event subject/title */
+  subject: string;
+  
+  /** Event start time */
+  start_at: Date;
+  
+  /** Event end time */
+  end_at: Date;
+  
+  /** Event timezone (IANA identifier) */
+  timezone: string;
+  
+  /** Event location */
+  location: string | null;
+  
+  /** Event organiser email */
+  organiser: string | null;
+  
+  /** User's response status */
+  response_status: "none" | "accepted" | "declined" | "tentative";
+  
+  /** Whether event is cancelled */
+  is_cancelled: boolean;
+  
+  /** Event body preview */
+  body_preview: string | null;
+  
+  /** First time seen during sync */
+  first_seen_at: Date;
+  
+  /** Last time seen during sync */
+  last_seen_at: Date;
+}
 
 /**
  * Calendar event creation input interface
@@ -503,7 +558,7 @@ export class CalendarEventHandler {
       if (typeof body.startTime !== "string") {
         throw new CalendarValidationError("Start time must be an ISO 8601 string", "startTime", body.startTime);
       }
-      const startInfo = validateDateTime(body.startTime, timezone, "startTime");
+      validateDateTime(body.startTime, timezone, "startTime");
       updateInput.startTime = body.startTime;
     }
 
@@ -511,7 +566,7 @@ export class CalendarEventHandler {
       if (typeof body.endTime !== "string") {
         throw new CalendarValidationError("End time must be an ISO 8601 string", "endTime", body.endTime);
       }
-      const endInfo = validateDateTime(body.endTime, timezone, "endTime");
+      validateDateTime(body.endTime, timezone, "endTime");
       updateInput.endTime = body.endTime;
     }
 

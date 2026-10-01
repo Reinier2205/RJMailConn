@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Microsoft Graph Client - Typed API Interface
  * 
  * Provides reliable, typed interface to Microsoft Graph API with automatic
@@ -371,11 +371,11 @@ export class GraphClient {
       }
 
       // Manual token refresh using Microsoft endpoint
-      const tokenUrl = `https://login.microsoftonline.com/${this.env.MICROSOFT_TENANT_ID}/oauth2/v2.0/token`;
+      const tokenUrl = `https://login.microsoftonline.com/${this.env.TENANT_ID}/oauth2/v2.0/token`;
       
       const requestBody = new URLSearchParams({
-        client_id: this.env.MICROSOFT_CLIENT_ID,
-        client_secret: this.env.MICROSOFT_CLIENT_SECRET,
+        client_id: this.env.CLIENT_ID,
+        client_secret: this.env.CLIENT_SECRET,
         grant_type: "refresh_token",
         refresh_token: tokens.refreshToken,
         scope: tokens.scope

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Calendar Event Endpoints - Calendar Event Management
  * 
  * Provides secure endpoints for creating and updating calendar events
@@ -14,7 +14,7 @@ import {
   validateEventTiming, 
   CalendarValidationError,
   isValidTimezone
-} from "../microsoft/calendar";
+} from "../validation/calendar";
 
 /**
  * Calendar event creation input interface
@@ -208,7 +208,7 @@ export class CalendarEventHandler {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? (error as Error).message : "Unknown error"
+        error: error instanceof Error ? error.message : "Unknown error"
       };
     }
   }
@@ -248,7 +248,7 @@ export class CalendarEventHandler {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? (error as Error).message : "Unknown error"
+        error: error instanceof Error ? error.message : "Unknown error"
       };
     }
   }
@@ -416,8 +416,8 @@ export class CalendarEventHandler {
     const timezone = body.timezone.trim();
 
     // Validate and parse datetime fields
-    const _startInfo = validateDateTime(body.startTime, timezone, "startTime");
-    const _endInfo = validateDateTime(body.endTime, timezone, "endTime");
+    const startInfo = validateDateTime(body.startTime, timezone, "startTime");
+    const endInfo = validateDateTime(body.endTime, timezone, "endTime");
 
     // Validate timing constraints (requirement 10.5)
     validateEventTiming(startInfo.date, endInfo.date);
@@ -513,7 +513,7 @@ export class CalendarEventHandler {
       if (typeof body.startTime !== "string") {
         throw new CalendarValidationError("Start time must be an ISO 8601 string", "startTime", body.startTime);
       }
-      const _startInfo = validateDateTime(body.startTime, timezone, "startTime");
+      validateDateTime(body.startTime, timezone, "startTime");
       updateInput.startTime = body.startTime;
     }
 
@@ -521,7 +521,7 @@ export class CalendarEventHandler {
       if (typeof body.endTime !== "string") {
         throw new CalendarValidationError("End time must be an ISO 8601 string", "endTime", body.endTime);
       }
-      const _endInfo = validateDateTime(body.endTime, timezone, "endTime");
+      validateDateTime(body.endTime, timezone, "endTime");
       updateInput.endTime = body.endTime;
     }
 
@@ -600,8 +600,8 @@ export class CalendarEventHandler {
     console.error(`${context}:`, error);
     
     const message = error instanceof CalendarValidationError 
-      ? (error as Error).message
-      : (error instanceof Error ? (error as Error).message : "Unknown error");
+      ? error.message
+      : (error instanceof Error ? error.message : "Unknown error");
     
     const status = error instanceof CalendarValidationError ? 400 : 500;
     
@@ -610,7 +610,7 @@ export class CalendarEventHandler {
         success: false,
         error: context,
         message: message,
-        field: error instanceof CalendarValidationError ? (error as any).field : undefined
+        field: error instanceof CalendarValidationError ? error.field : undefined
       }),
       { 
         status,

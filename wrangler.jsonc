@@ -27,11 +27,6 @@
     ]
   },
   
-  // Build configuration
-  "build": {
-    "command": "npm run build"
-  },
-  
   // Development configuration
   "dev": {
     "ip": "localhost",

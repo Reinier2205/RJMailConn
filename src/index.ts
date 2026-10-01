@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Morning Brief Connector - Main Entry Point
  * 
  * Production-quality Microsoft 365 connector for Reinier's Morning Intelligence Brief.
@@ -18,9 +18,9 @@ export interface Environment {
   DB: D1Database;
   
   // Secrets (managed via Cloudflare dashboard)
-  MICROSOFT_CLIENT_ID: string;
-  MICROSOFT_CLIENT_SECRET: string;
-  MICROSOFT_TENANT_ID: string;
+  CLIENT_ID: string;
+  CLIENT_SECRET: string;
+  TENANT_ID: string;
   CONNECTOR_API_TOKEN: string;
   OAUTH_STATE_SECRET: string;
   

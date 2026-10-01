@@ -1,4 +1,4 @@
-/**
+﻿/**
  * OAuth Handler - Microsoft OAuth 2.0 Authorization Code Flow
  * 
  * Manages secure authentication with Microsoft Entra ID using delegated permissions.
@@ -64,10 +64,10 @@ export class OAuthHandler {
     'Calendars.ReadWrite'
   ].join(' ');
 
-  constructor(env: Environment, baseUrl: string = 'https://morning-brief-connector.workers.dev') {
-    this.clientId = env.MICROSOFT_CLIENT_ID;
-    this.clientSecret = env.MICROSOFT_CLIENT_SECRET;
-    this.tenantId = env.MICROSOFT_TENANT_ID;
+  constructor(env: Environment, baseUrl: string = 'https://morning-brief-connector.reinier-olivier.workers.dev') {
+    this.clientId = env.CLIENT_ID;
+    this.clientSecret = env.CLIENT_SECRET;
+    this.tenantId = env.TENANT_ID;
     this.redirectUri = `${baseUrl}/auth/callback`;
     this.tokenStorage = new TokenStorage(env);
     this.stateManager = new OAuthStateManager(env);

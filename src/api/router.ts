@@ -1,4 +1,4 @@
-/**
+﻿/**
  * API Router - HTTP Request Routing and Authentication
  * 
  * Handles all HTTP routing, authentication, and endpoint management

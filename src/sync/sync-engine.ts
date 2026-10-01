@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Sync Engine - Reliable Email and Calendar Synchronization
  * 
  * Orchestrates checkpoint-based synchronization with failure retention,
@@ -7,8 +7,8 @@
 
 import { Environment } from "../index";
 import { GraphClient, RetrievalResult, RetrievalStatus } from "../microsoft/graph";
-import { EmailMessage, EmailRepository, processBatchMessages } from "../microsoft/email";
-import { SyncStateRecord, SyncSource, CompleteSyncResult, SyncResult, SyncCheckpoint, SyncValidation } from "../database/models";
+import { EmailMessage,  EmailRepository, processBatchMessages } from "../microsoft/email";
+import { SyncSource, CompleteSyncResult, SyncResult, SyncCheckpoint, SyncValidation } from "../database/models";
 import { auditLog } from "../database/audit";
 
 /**
@@ -179,7 +179,7 @@ export class SyncEngine {
       
       result.retainedPrevious = true;
       result.status = "failed";
-      result.completedAt = new Date();
+      result.completedAt = new Date().toISOString();
       result.error = {
         code: "SYNC_ERROR",
         message: errorMessage,
@@ -204,7 +204,7 @@ export class SyncEngine {
       itemsProcessed: 0,
       pagesProcessed: 0,
       startedAt: startTime,
-      completedAt: new Date(),
+      completedAt: new Date().toISOString(),
       retainedPrevious: false
     };
   }

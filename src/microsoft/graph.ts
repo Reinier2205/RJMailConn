@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Microsoft Graph Client - Typed API Interface
  * 
  * Provides reliable, typed interface to Microsoft Graph API with automatic
@@ -230,7 +230,7 @@ export class GraphClient {
         const pageResponse = await this.fetchWithRetry(currentUrl);
         const pageData = await pageResponse.json();
         
-        if ((pageData as any)?.value && Array.isArray((pageData as any).value)) {
+        if ((pageData as any).value && Array.isArray((pageData as any).value)) {
           items.push(...(pageData as any).value);
         }
         

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * OAuth Handler - Microsoft OAuth 2.0 Authorization Code Flow
  * 
  * Manages secure authentication with Microsoft Entra ID using delegated permissions.

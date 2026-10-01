@@ -1,4 +1,4 @@
-﻿/**
+/**
  * OAuth State Manager - CSRF Protection for OAuth Flow
  * 
  * Generates and validates cryptographically secure state parameters
@@ -59,7 +59,7 @@ export class OAuthStateManager {
       }
 
       // Check timestamp is within valid window (30 minutes)
-      const stateTime = parseInt(timestamp ?? "0");
+      const stateTime = parseInt(timestamp || '0');
       const now = Date.now();
       const thirtyMinutes = 30 * 60 * 1000;
       

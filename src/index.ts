@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Morning Brief Connector - Main Entry Point
  * 
  * Production-quality Microsoft 365 connector for Reinier's Morning Intelligence Brief.

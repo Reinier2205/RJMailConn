@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Email Models and Validation - Microsoft Graph Email Integration
  * 
  * Provides TypeScript interfaces, validation logic, and transformation
@@ -370,7 +370,7 @@ export function createEmailMessageRecord(input: CreateEmailMessageInput): EmailM
     is_read: validated.is_read,
     importance: validated.importance,
     has_attachments: validated.has_attachments,
-    classification: validated.classification ?? "general",
+    classification: validated.classification ?? 'unclassified',
     body_preview: validated.body_preview ?? null,
     web_link: validated.web_link ?? null,
     first_seen_at: now,

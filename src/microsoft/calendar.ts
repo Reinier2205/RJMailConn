@@ -1,496 +1,611 @@
-﻿/**
- * Calendar Models and Validation - Microsoft Graph Calendar Integration
+/**
+ * Calendar Event Endpoints - Calendar Event Management
  * 
- * Provides TypeScript interfaces, validation logic, and transformation
- * functions for calendar event data from Microsoft Graph API.
+ * Provides secure endpoints for creating and updating calendar events
+ * with proper validation and audit logging.
  */
 
-/**
- * Response status for calendar events
- */
-export type ResponseStatus = "none" | "accepted" | "declined" | "tentative";
 
 /**
- * Internal calendar event model (matches database schema)
- */
-export interface CalendarEvent {
-  /** Internal database ID */
-  id: string;
-  
-  /** Unique Microsoft Graph event ID */
-  graph_event_id: string;
-  
-  /** Event subject/title */
-  subject: string;
-  
-  /** Event start date and time */
-  start_at: Date;
-  
-  /** Event end date and time */
-  end_at: Date;
-  
-  /** IANA timezone identifier */
-  timezone: string;
-  
-  /** Event location */
-  location: string | null;
-  
-  /** Event organizer */
-  organiser: string | null;
-  
-  /** User's response to the event */
-  response_status: ResponseStatus;
-  
-  /** Whether event is cancelled */
-  is_cancelled: boolean;
-  
-  /** Event body preview */
-  body_preview: string | null;
-  
-  /** First time seen during sync */
-  first_seen_at: Date;
-  
-  /** Last time seen during sync */
-  last_seen_at: Date;
-}
-
-/**
- * Microsoft Graph calendar event response structure
- */
-export interface GraphCalendarEvent {
-  id: string;
-  subject?: string;
-  start?: {
-    dateTime: string;
-    timeZone?: string;
-  };
-  end?: {
-    dateTime: string;
-    timeZone?: string;
-  };
-  location?: {
-    displayName?: string;
-  };
-  organizer?: {
-    emailAddress?: {
-      name?: string;
-      address?: string;
-    };
-  };
-  responseStatus?: {
-    response?: string;
-  };
-  isCancelled?: boolean;
-  bodyPreview?: string;
-}
-
-/**
- * Calendar event creation input
+ * Calendar event creation input interface
  */
 export interface CreateCalendarEventInput {
-  graph_event_id: string;
   subject: string;
-  start_at: Date;
-  end_at: Date;
-  timezone: string;
-  location?: string | null;
-  organiser?: string | null;
-  response_status?: ResponseStatus;
-  is_cancelled?: boolean;
-  body_preview?: string | null;
+  startTime: string;  // ISO 8601 datetime string
+  endTime: string;    // ISO 8601 datetime string
+  timezone: string;   // IANA timezone identifier
+  location?: string;
+  body?: string;
+  attendees?: string[];
+  isAllDay?: boolean;
+  showAs?: "free" | "tentative" | "busy" | "oof" | "workingElsewhere";
+  sensitivity?: "normal" | "personal" | "private" | "confidential";
 }
 
 /**
- * Calendar event update input
+ * Calendar event update input interface
  */
 export interface UpdateCalendarEventInput {
   subject?: string;
-  start_at?: Date;
-  end_at?: Date;
+  startTime?: string;
+  endTime?: string;
   timezone?: string;
-  location?: string | null;
-  organiser?: string | null;
-  response_status?: ResponseStatus;
-  is_cancelled?: boolean;
-  body_preview?: string | null;
-  last_seen_at?: Date;
+  location?: string;
+  body?: string;
+  attendees?: string[];
+  isAllDay?: boolean;
+  showAs?: "free" | "tentative" | "busy" | "oof" | "workingElsewhere";
+  sensitivity?: "normal" | "personal" | "private" | "confidential";
 }
 
 /**
- * Calendar validation error
+ * Calendar event operation result
  */
-export class CalendarValidationError extends Error {
-  constructor(
-    message: string,
-    public field?: string,
-    public value?: any
-  ) {
-    super(message);
-    this.name = "CalendarValidationError";
-  }
+export interface CalendarEventResult {
+  success: boolean;
+  eventId?: string;
+  webLink?: string;
+  error?: string;
 }
 
 /**
- * Validate response status
+ * Calendar Event Handler
  */
-export function validateResponseStatus(status: string | undefined): ResponseStatus {
-  const normalized = status?.toLowerCase();
-  
-  switch (normalized) {
-    case "accepted":
-      return "accepted";
-    case "declined": 
-      return "declined";
-    case "tentative":
-      return "tentative";
-    case "none":
-    case "":
-    case undefined:
-    case null:
-      return "none";
-    default:
-      console.warn(`Unknown response status: ${status}, defaulting to none`);
-      return "none";
-  }
-}
+export class CalendarEventHandler {
+  private readonly env: Environment;
+  private readonly graphClient: GraphClient;
 
-/**
- * Validate and normalize event subject
- */
-export function validateSubject(subject: string | undefined | null): string {
-  if (subject === null || subject === undefined) {
-    return "";
+  constructor(env: Environment) {
+    this.env = env;
+    this.graphClient = new GraphClient(env);
   }
-  
-  if (typeof subject !== "string") {
-    return String(subject).trim();
-  }
-  
-  return subject.trim();
-}
 
-/**
- * Validate Graph event ID
- */
-export function validateGraphEventId(id: string): string {
-  if (!id || typeof id !== "string") {
-    throw new CalendarValidationError("Graph event ID is required", "graph_event_id", id);
-  }
-  
-  const trimmed = id.trim();
-  if (trimmed.length === 0) {
-    throw new CalendarValidationError("Graph event ID cannot be empty", "graph_event_id", id);
-  }
-  
-  return trimmed;
-}
-
-/**
- * Validate and parse datetime with timezone
- */
-export function validateDateTime(
-  dateTimeStr: string | undefined,
-  timezone: string | undefined,
-  fieldName: string
-): { date: Date; timezone: string } {
-  if (!dateTimeStr || typeof dateTimeStr !== "string") {
-    throw new CalendarValidationError(`${fieldName} datetime is required`, fieldName, dateTimeStr);
-  }
-  
-  const date = new Date(dateTimeStr);
-  if (isNaN(date.getTime())) {
-    throw new CalendarValidationError(`Invalid ${fieldName} datetime format`, fieldName, dateTimeStr);
-  }
-  
-  // Default to UTC if no timezone provided
-  const validTimezone = timezone && timezone.trim() ? timezone.trim() : "UTC";
-  
-  // Basic timezone validation (can be enhanced)
-  if (!isValidTimezone(validTimezone)) {
-    console.warn(`Invalid timezone ${validTimezone}, using UTC`);
-    return { date, timezone: "UTC" };
-  }
-  
-  return { date, timezone: validTimezone };
-}
-
-/**
- * Validate IANA timezone identifier (basic validation)
- */
-export function isValidTimezone(timezone: string): boolean {
-  // Basic validation - can be enhanced with full IANA timezone list
-  const validPatterns = [
-    /^UTC$/,
-    /^[A-Za-z]+\/[A-Za-z_]+$/,  // e.g., America/New_York
-    /^[A-Za-z]+\/[A-Za-z_]+\/[A-Za-z_]+$/,  // e.g., America/Argentina/Buenos_Aires
-    /^GMT[+-]\d{1,2}$/  // e.g., GMT+2
-  ];
-  
-  return validPatterns.some(pattern => pattern.test(timezone));
-}
-
-/**
- * Validate event timing constraints
- */
-export function validateEventTiming(startAt: Date, endAt: Date): void {
-  if (startAt >= endAt) {
-    throw new CalendarValidationError(
-      "Event start time must be before end time",
-      "timing",
-      { startAt: startAt.toISOString(), endAt: endAt.toISOString() }
-    );
-  }
-  
-  // Additional validation: events should not be longer than 30 days
-  const maxDuration = 30 * 24 * 60 * 60 * 1000; // 30 days in milliseconds
-  if (endAt.getTime() - startAt.getTime() > maxDuration) {
-    throw new CalendarValidationError(
-      "Event duration cannot exceed 30 days",
-      "timing",
-      { startAt: startAt.toISOString(), endAt: endAt.toISOString() }
-    );
-  }
-}
-
-/**
- * Transform Microsoft Graph event to internal model
- */
-export function transformGraphEvent(graphEvent: GraphCalendarEvent): CreateCalendarEventInput {
-  try {
-    // Validate and extract required fields
-    const graphEventId = validateGraphEventId(graphEvent.id);
-    const subject = validateSubject(graphEvent.subject);
-    
-    // Parse start datetime and timezone
-    if (!graphEvent.start?.dateTime) {
-      throw new CalendarValidationError("Event start datetime is required", "start", graphEvent.start);
-    }
-    
-    const startInfo = validateDateTime(
-      graphEvent.start.dateTime,
-      graphEvent.start.timeZone,
-      "start"
-    );
-    
-    // Parse end datetime and timezone  
-    if (!graphEvent.end?.dateTime) {
-      throw new CalendarValidationError("Event end datetime is required", "end", graphEvent.end);
-    }
-    
-    const endInfo = validateDateTime(
-      graphEvent.end.dateTime,
-      graphEvent.end.timeZone,
-      "end"
-    );
-    
-    // Validate timing constraints
-    validateEventTiming(startInfo.date, endInfo.date);
-    
-    // Use start timezone as primary (most common pattern)
-    const timezone = startInfo.timezone;
-    
-    // Process optional fields
-    const location = graphEvent.location?.displayName?.trim() || null;
-    const organiser = graphEvent.organizer?.emailAddress?.name?.trim() || 
-                     graphEvent.organizer?.emailAddress?.address?.trim() || null;
-    const responseStatus = validateResponseStatus(graphEvent.responseStatus?.response);
-    const isCancelled = Boolean(graphEvent.isCancelled);
-    const bodyPreview = graphEvent.bodyPreview?.trim() || null;
-    
-    return {
-      graph_event_id: graphEventId,
-      subject: subject,
-      start_at: startInfo.date,
-      end_at: endInfo.date,
-      timezone: timezone,
-      location: location,
-      organiser: organiser,
-      response_status: responseStatus,
-      is_cancelled: isCancelled,
-      body_preview: bodyPreview
-    };
-    
-  } catch (error) {
-    if (error instanceof CalendarValidationError) {
-      throw error;
-    }
-    
-    throw new CalendarValidationError(
-      `Failed to transform Graph event: ${error instanceof Error ? error.message : "Unknown error"}`,
-      "transform",
-      graphEvent
-    );
-  }
-}
-
-/**
- * Validate complete calendar event input
- */
-export function validateCalendarEventInput(input: CreateCalendarEventInput): CreateCalendarEventInput {
-  const validated: CreateCalendarEventInput = {
-    graph_event_id: validateGraphEventId(input.graph_event_id),
-    subject: validateSubject(input.subject),
-    start_at: input.start_at,
-    end_at: input.end_at,
-    timezone: input.timezone,
-    location: input.location?.trim() || null,
-    organiser: input.organiser?.trim() || null,
-    response_status: input.response_status || "none",
-    is_cancelled: Boolean(input.is_cancelled),
-    body_preview: input.body_preview?.trim() || null
-  };
-  
-  // Validate timing constraints
-  validateEventTiming(validated.start_at, validated.end_at);
-  
-  // Validate timezone
-  if (!isValidTimezone(validated.timezone)) {
-    throw new CalendarValidationError("Invalid timezone identifier", "timezone", validated.timezone);
-  }
-  
-  return validated;
-}
-
-/**
- * Create calendar event database record
- */
-export function createCalendarEventRecord(input: CreateCalendarEventInput): CalendarEvent {
-  const validated = validateCalendarEventInput(input);
-  const now = new Date();
-  
-  return {
-    id: crypto.randomUUID(),
-    graph_event_id: validated.graph_event_id,
-    subject: validated.subject,
-    start_at: validated.start_at,
-    end_at: validated.end_at,
-    timezone: validated.timezone,
-    location: validated.location ?? null,
-    organiser: validated.organiser ?? null,
-    response_status: validated.response_status ?? "none",
-    is_cancelled: validated.is_cancelled ?? false,
-    body_preview: validated.body_preview ?? null,
-    first_seen_at: now,
-    last_seen_at: now
-  };
-}
-
-/**
- * Calendar repository interface for database operations
- */
-export interface CalendarRepository {
-  create(event: CalendarEvent): Promise<void>;
-  findByGraphId(graphEventId: string): Promise<CalendarEvent | null>;
-  updateLastSeen(graphEventId: string, timestamp: Date): Promise<void>;
-  update(graphEventId: string, updates: UpdateCalendarEventInput): Promise<void>;
-  findByDateRange(startDate: Date, endDate: Date, limit?: number, offset?: number): Promise<CalendarEvent[]>;
-  findToday(limit?: number, offset?: number): Promise<CalendarEvent[]>;
-  findUpcoming(days: number, limit?: number, offset?: number): Promise<CalendarEvent[]>;
-  count(): Promise<number>;
-  countByDateRange(startDate: Date, endDate: Date): Promise<number>;
-}
-
-/**
- * Batch calendar processing result
- */
-export interface CalendarBatchResult {
-  processed: number;
-  created: number;
-  updated: number;
-  errors: number;
-  errorMessages: string[];
-}
-
-/**
- * Process batch of Graph events with deduplication
- */
-export async function processBatchEvents(
-  graphEvents: GraphCalendarEvent[],
-  repository: CalendarRepository
-): Promise<CalendarBatchResult> {
-  const result: CalendarBatchResult = {
-    processed: 0,
-    created: 0,
-    updated: 0,
-    errors: 0,
-    errorMessages: []
-  };
-  
-  for (const graphEvent of graphEvents) {
+  /**
+   * Handle POST /calendar/events - Create new calendar event
+   */
+  async handleCreateEvent(request: Request): Promise<Response> {
     try {
-      result.processed++;
+      const eventInput = await this.parseAndValidateCreateEvent(request);
+      const result = await this.createCalendarEvent(eventInput);
       
-      // Transform Graph event to internal format
-      const eventInput = transformGraphEvent(graphEvent);
-      
-      // Check if event already exists
-      const existing = await repository.findByGraphId(eventInput.graph_event_id);
-      
-      if (existing) {
-        // Update existing event
-        await repository.updateLastSeen(eventInput.graph_event_id, new Date());
-        
-        // Check if we need to update other fields (subject, timing, etc.)
-        const updates: UpdateCalendarEventInput = {
+      // Log event creation to audit trail
+      await auditLog(this.env.DB, {
+        operation: "create",
+        resourceType: "calendar_event",
+        resourceId: result.eventId || null,
+        result: result.success ? "success" : "failure",
+        requestedBy: "api",
+        details: {
+          action: "create_calendar_event",
           subject: eventInput.subject,
-          start_at: eventInput.start_at,
-          end_at: eventInput.end_at,
+          startTime: eventInput.startTime,
+          endTime: eventInput.endTime,
           timezone: eventInput.timezone,
-          location: eventInput.location,
-          organiser: eventInput.organiser,
-          response_status: eventInput.response_status,
-          is_cancelled: eventInput.is_cancelled,
-          body_preview: eventInput.body_preview,
-          last_seen_at: new Date()
-        };
-        
-        await repository.update(eventInput.graph_event_id, updates);
-        result.updated++;
+          attendeeCount: eventInput.attendees?.length || 0,
+          error: result.error
+        }
+      });
+      
+      if (result.success) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            eventId: result.eventId,
+            webLink: result.webLink,
+            message: "Calendar event created successfully"
+          }),
+          { 
+            status: 201,
+            headers: { "Content-Type": "application/json" }
+          }
+        );
       } else {
-        // Create new event
-        const eventRecord = createCalendarEventRecord(eventInput);
-        await repository.create(eventRecord);
-        result.created++;
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: result.error
+          }),
+          { 
+            status: 400,
+            headers: { "Content-Type": "application/json" }
+          }
+        );
       }
       
     } catch (error) {
-      result.errors++;
-      const errorMsg = error instanceof Error ? error.message : "Unknown error";
-      result.errorMessages.push(`Event ${graphEvent.id}: ${errorMsg}`);
-      console.error("Failed to process calendar event:", error);
+      return this.handleError(error, "Calendar event creation failed");
     }
   }
-  
-  return result;
-}
 
-/**
- * Filter events for today
- */
-export function filterTodayEvents(events: CalendarEvent[]): CalendarEvent[] {
-  const today = new Date();
-  const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const endOfDay = new Date(startOfDay);
-  endOfDay.setDate(endOfDay.getDate() + 1);
-  
-  return events.filter(event => 
-    !event.is_cancelled &&
-    event.start_at < endOfDay &&
-    event.end_at > startOfDay
-  );
-}
+  /**
+   * Handle PATCH /calendar/events/:id - Update existing calendar event
+   */
+  async handleUpdateEvent(request: Request, eventId: string): Promise<Response> {
+    try {
+      const updateInput = await this.parseAndValidateUpdateEvent(request);
+      const result = await this.updateCalendarEvent(eventId, updateInput);
+      
+      // Log event update to audit trail
+      await auditLog(this.env.DB, {
+        operation: "update",
+        resourceType: "calendar_event",
+        resourceId: eventId,
+        result: result.success ? "success" : "failure",
+        requestedBy: "api",
+        details: {
+          action: "update_calendar_event",
+          eventId: eventId,
+          updatedFields: Object.keys(updateInput),
+          error: result.error
+        }
+      });
+      
+      if (result.success) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            eventId: eventId,
+            webLink: result.webLink,
+            message: "Calendar event updated successfully"
+          }),
+          { 
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          }
+        );
+      } else {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: result.error
+          }),
+          { 
+            status: 400,
+            headers: { "Content-Type": "application/json" }
+          }
+        );
+      }
+      
+    } catch (error) {
+      return this.handleError(error, "Calendar event update failed");
+    }
+  }
 
-/**
- * Filter events for next N days
- */
-export function filterUpcomingEvents(events: CalendarEvent[], days: number): CalendarEvent[] {
-  const now = new Date();
-  const futureDate = new Date(now);
-  futureDate.setDate(futureDate.getDate() + days);
-  
-  return events.filter(event =>
-    !event.is_cancelled &&
-    event.start_at > now &&
-    event.start_at < futureDate
-  ).sort((a, b) => a.start_at.getTime() - b.start_at.getTime());
+  /**
+   * Create calendar event via Microsoft Graph
+   */
+  private async createCalendarEvent(eventInput: CreateCalendarEventInput): Promise<CalendarEventResult> {
+    try {
+      // Transform to Microsoft Graph event format
+      const graphEvent = this.transformToGraphEvent(eventInput);
+
+      // Create event via Microsoft Graph
+      const createResult = await this.graphClient.createCalendarEvent(graphEvent);
+      
+      if (createResult.success) {
+        return {
+          success: true,
+          eventId: createResult.id,
+          webLink: `https://outlook.office.com/calendar/`
+        };
+      } else {
+        return {
+          success: false,
+          error: createResult.error?.message || "Calendar event creation failed"
+        };
+      }
+      
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error"
+      };
+    }
+  }
+
+  /**
+   * Update calendar event via Microsoft Graph
+   */
+  private async updateCalendarEvent(eventId: string, updateInput: UpdateCalendarEventInput): Promise<CalendarEventResult> {
+    try {
+      // First, verify the event exists (requirement 10.2)
+      const existingEvent = await this.getExistingEvent(eventId);
+      if (!existingEvent) {
+        return {
+          success: false,
+          error: "Calendar event not found"
+        };
+      }
+
+      // Transform update input to Microsoft Graph format
+      const graphUpdate = this.transformUpdateToGraphEvent(updateInput);
+
+      // Update event via Microsoft Graph
+      const updateResult = await this.graphClient.updateCalendarEvent(eventId, graphUpdate);
+      
+      if (updateResult.success) {
+        return {
+          success: true,
+          webLink: `https://outlook.office.com/calendar/`
+        };
+      } else {
+        return {
+          success: false,
+          error: updateResult.error?.message || "Calendar event update failed"
+        };
+      }
+      
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error"
+      };
+    }
+  }
+
+  /**
+   * Get existing calendar event to verify ID (requirement 10.2)
+   */
+  private async getExistingEvent(eventId: string): Promise<any> {
+    try {
+      const result = await this.graphClient.getCalendarEvent(eventId);
+      if (result.success) {
+        return result.event;
+      } else {
+        console.error("Failed to get existing event:", result.error);
+        return null;
+      }
+    } catch (error) {
+      console.error("Failed to get existing event:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Transform input to Microsoft Graph event format
+   */
+  private transformToGraphEvent(eventInput: CreateCalendarEventInput): any {
+    const graphEvent: any = {
+      subject: eventInput.subject,
+      body: {
+        contentType: "HTML",
+        content: eventInput.body || ""
+      },
+      start: {
+        dateTime: eventInput.startTime,
+        timeZone: eventInput.timezone
+      },
+      end: {
+        dateTime: eventInput.endTime,
+        timeZone: eventInput.timezone
+      },
+      isAllDay: Boolean(eventInput.isAllDay),
+      showAs: eventInput.showAs || "busy",
+      sensitivity: eventInput.sensitivity || "normal"
+    };
+
+    // Add location if provided
+    if (eventInput.location) {
+      graphEvent.location = {
+        displayName: eventInput.location
+      };
+    }
+
+    // Add attendees if provided
+    if (eventInput.attendees && eventInput.attendees.length > 0) {
+      graphEvent.attendees = eventInput.attendees.map(email => ({
+        emailAddress: {
+          address: email.trim(),
+          name: email.trim()
+        },
+        type: "required"
+      }));
+    }
+
+    return graphEvent;
+  }
+
+  /**
+   * Transform update input to Microsoft Graph event format
+   */
+  private transformUpdateToGraphEvent(updateInput: UpdateCalendarEventInput): any {
+    const graphUpdate: any = {};
+
+    if (updateInput.subject !== undefined) {
+      graphUpdate.subject = updateInput.subject;
+    }
+
+    if (updateInput.body !== undefined) {
+      graphUpdate.body = {
+        contentType: "HTML",
+        content: updateInput.body
+      };
+    }
+
+    if (updateInput.startTime !== undefined && updateInput.timezone !== undefined) {
+      graphUpdate.start = {
+        dateTime: updateInput.startTime,
+        timeZone: updateInput.timezone
+      };
+    }
+
+    if (updateInput.endTime !== undefined && updateInput.timezone !== undefined) {
+      graphUpdate.end = {
+        dateTime: updateInput.endTime,
+        timeZone: updateInput.timezone
+      };
+    }
+
+    if (updateInput.location !== undefined) {
+      graphUpdate.location = {
+        displayName: updateInput.location
+      };
+    }
+
+    if (updateInput.isAllDay !== undefined) {
+      graphUpdate.isAllDay = updateInput.isAllDay;
+    }
+
+    if (updateInput.showAs !== undefined) {
+      graphUpdate.showAs = updateInput.showAs;
+    }
+
+    if (updateInput.sensitivity !== undefined) {
+      graphUpdate.sensitivity = updateInput.sensitivity;
+    }
+
+    if (updateInput.attendees !== undefined) {
+      graphUpdate.attendees = updateInput.attendees.map(email => ({
+        emailAddress: {
+          address: email.trim(),
+          name: email.trim()
+        },
+        type: "required"
+      }));
+    }
+
+    return graphUpdate;
+  }
+
+  /**
+   * Parse and validate calendar event creation input
+   */
+  private async parseAndValidateCreateEvent(request: Request): Promise<CreateCalendarEventInput> {
+    let body: any;
+    
+    try {
+      body = await request.json();
+    } catch (error) {
+      throw new CalendarValidationError("Invalid JSON in request body", "body", body);
+    }
+
+    // Validate required fields (requirement 10.1)
+    if (!body.subject || typeof body.subject !== "string") {
+      throw new CalendarValidationError("Subject is required and must be a string", "subject", body.subject);
+    }
+
+    if (!body.startTime || typeof body.startTime !== "string") {
+      throw new CalendarValidationError("Start time is required and must be an ISO 8601 string", "startTime", body.startTime);
+    }
+
+    if (!body.endTime || typeof body.endTime !== "string") {
+      throw new CalendarValidationError("End time is required and must be an ISO 8601 string", "endTime", body.endTime);
+    }
+
+    if (!body.timezone || typeof body.timezone !== "string") {
+      throw new CalendarValidationError("Timezone is required and must be an IANA timezone identifier", "timezone", body.timezone);
+    }
+
+    // Validate subject
+    const subject = validateSubject(body.subject);
+
+    // Validate timezone
+    if (!isValidTimezone(body.timezone.trim())) {
+      throw new CalendarValidationError("Invalid timezone identifier", "timezone", body.timezone);
+    }
+    const timezone = body.timezone.trim();
+
+    // Validate and parse datetime fields
+    const startInfo = validateDateTime(body.startTime, timezone, "startTime");
+    const endInfo = validateDateTime(body.endTime, timezone, "endTime");
+
+    // Validate timing constraints (requirement 10.5)
+    validateEventTiming(startInfo.date, endInfo.date);
+
+    // Validate optional fields
+    const location = body.location && typeof body.location === "string" ? body.location.trim() : undefined;
+    const bodyContent = body.body && typeof body.body === "string" ? body.body.trim() : undefined;
+    const isAllDay = body.isAllDay !== undefined ? Boolean(body.isAllDay) : false;
+
+    // Validate attendees if provided
+    let attendees: string[] | undefined = undefined;
+    if (body.attendees) {
+      if (!Array.isArray(body.attendees)) {
+        throw new CalendarValidationError("Attendees must be an array of email addresses", "attendees", body.attendees);
+      }
+      attendees = this.validateEmailList(body.attendees, "attendees");
+    }
+
+    // Validate showAs enum
+    const validShowAs = ["free", "tentative", "busy", "oof", "workingElsewhere"];
+    if (body.showAs && !validShowAs.includes(body.showAs)) {
+      throw new CalendarValidationError(`ShowAs must be one of: ${validShowAs.join(", ")}`, "showAs", body.showAs);
+    }
+
+    // Validate sensitivity enum
+    const validSensitivity = ["normal", "personal", "private", "confidential"];
+    if (body.sensitivity && !validSensitivity.includes(body.sensitivity)) {
+      throw new CalendarValidationError(`Sensitivity must be one of: ${validSensitivity.join(", ")}`, "sensitivity", body.sensitivity);
+    }
+
+    return {
+      subject,
+      startTime: body.startTime,
+      endTime: body.endTime,
+      timezone,
+      location,
+      body: bodyContent,
+      attendees,
+      isAllDay,
+      showAs: body.showAs,
+      sensitivity: body.sensitivity
+    };
+  }
+
+  /**
+   * Parse and validate calendar event update input
+   */
+  private async parseAndValidateUpdateEvent(request: Request): Promise<UpdateCalendarEventInput> {
+    let body: any;
+    
+    try {
+      body = await request.json();
+    } catch (error) {
+      throw new CalendarValidationError("Invalid JSON in request body", "body", body);
+    }
+
+    const updateInput: UpdateCalendarEventInput = {};
+
+    // Validate subject if provided
+    if (body.subject !== undefined) {
+      if (typeof body.subject !== "string") {
+        throw new CalendarValidationError("Subject must be a string", "subject", body.subject);
+      }
+      updateInput.subject = validateSubject(body.subject);
+    }
+
+    // Validate timezone if provided (needed for time validation)
+    let timezone: string | undefined = undefined;
+    if (body.timezone !== undefined) {
+      if (typeof body.timezone !== "string") {
+        throw new CalendarValidationError("Timezone must be a string", "timezone", body.timezone);
+      }
+      if (!isValidTimezone(body.timezone.trim())) {
+        throw new CalendarValidationError("Invalid timezone identifier", "timezone", body.timezone);
+      }
+      timezone = body.timezone.trim();
+      updateInput.timezone = timezone;
+    }
+
+    // Validate datetime fields if provided
+    if (body.startTime !== undefined || body.endTime !== undefined) {
+      // If either time field is provided, timezone must also be provided or already exist
+      if (body.timezone === undefined) {
+        throw new CalendarValidationError(
+          "Timezone is required when updating start or end times", 
+          "timezone", 
+          body.timezone
+        );
+      }
+    }
+
+    if (body.startTime !== undefined) {
+      if (typeof body.startTime !== "string") {
+        throw new CalendarValidationError("Start time must be an ISO 8601 string", "startTime", body.startTime);
+      }
+      const startInfo = validateDateTime(body.startTime, timezone, "startTime");
+      updateInput.startTime = body.startTime;
+    }
+
+    if (body.endTime !== undefined) {
+      if (typeof body.endTime !== "string") {
+        throw new CalendarValidationError("End time must be an ISO 8601 string", "endTime", body.endTime);
+      }
+      const endInfo = validateDateTime(body.endTime, timezone, "endTime");
+      updateInput.endTime = body.endTime;
+    }
+
+    // Validate timing if both start and end are provided
+    if (updateInput.startTime && updateInput.endTime) {
+      const startDate = new Date(updateInput.startTime);
+      const endDate = new Date(updateInput.endTime);
+      validateEventTiming(startDate, endDate);
+    }
+
+    // Validate optional fields
+    if (body.location !== undefined) {
+      updateInput.location = typeof body.location === "string" ? body.location.trim() : "";
+    }
+
+    if (body.body !== undefined) {
+      updateInput.body = typeof body.body === "string" ? body.body.trim() : "";
+    }
+
+    if (body.isAllDay !== undefined) {
+      updateInput.isAllDay = Boolean(body.isAllDay);
+    }
+
+    // Validate attendees if provided
+    if (body.attendees !== undefined) {
+      if (!Array.isArray(body.attendees)) {
+        throw new CalendarValidationError("Attendees must be an array of email addresses", "attendees", body.attendees);
+      }
+      updateInput.attendees = this.validateEmailList(body.attendees, "attendees");
+    }
+
+    // Validate enums if provided
+    const validShowAs = ["free", "tentative", "busy", "oof", "workingElsewhere"];
+    if (body.showAs !== undefined && !validShowAs.includes(body.showAs)) {
+      throw new CalendarValidationError(`ShowAs must be one of: ${validShowAs.join(", ")}`, "showAs", body.showAs);
+    }
+    if (body.showAs !== undefined) {
+      updateInput.showAs = body.showAs;
+    }
+
+    const validSensitivity = ["normal", "personal", "private", "confidential"];
+    if (body.sensitivity !== undefined && !validSensitivity.includes(body.sensitivity)) {
+      throw new CalendarValidationError(`Sensitivity must be one of: ${validSensitivity.join(", ")}`, "sensitivity", body.sensitivity);
+    }
+    if (body.sensitivity !== undefined) {
+      updateInput.sensitivity = body.sensitivity;
+    }
+
+    return updateInput;
+  }
+
+  /**
+   * Validate email list for attendees
+   */
+  private validateEmailList(emails: any[], fieldName: string): string[] {
+    return emails.map((email, index) => {
+      if (typeof email !== "string") {
+        throw new CalendarValidationError(`${fieldName}[${index}] must be a string`, fieldName, email);
+      }
+      
+      const trimmed = email.trim().toLowerCase();
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      
+      if (!emailRegex.test(trimmed)) {
+        throw new CalendarValidationError(`Invalid email format: ${email}`, fieldName, email);
+      }
+      
+      return trimmed;
+    });
+  }
+
+  /**
+   * Handle errors consistently
+   */
+  private handleError(error: unknown, context: string): Response {
+    console.error(`${context}:`, error);
+    
+    const message = error instanceof CalendarValidationError 
+      ? error.message
+      : (error instanceof Error ? error.message : "Unknown error");
+    
+    const status = error instanceof CalendarValidationError ? 400 : 500;
+    
+    return new Response(
+      JSON.stringify({ 
+        success: false,
+        error: context,
+        message: message,
+        field: error instanceof CalendarValidationError ? error.field : undefined
+      }),
+      { 
+        status,
+        headers: { "Content-Type": "application/json" }
+      }
+    );
+  }
 }

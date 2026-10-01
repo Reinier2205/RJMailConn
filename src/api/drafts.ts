@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Draft Email Endpoints - Email Draft Creation (NO SENDING)
  * 
  * Provides secure endpoints for creating email drafts without sending capability.
@@ -246,7 +246,7 @@ export class DraftHandler {
       }
 
       // Create reply draft via Microsoft Graph
-      const replyEndpoint = replyInput.replyAll 
+      const _replyEndpoint = replyInput.replyAll 
         ? `/me/messages/${replyInput.messageId}/createReplyAll`
         : `/me/messages/${replyInput.messageId}/createReply`;
 

@@ -1,0 +1,5 @@
+﻿Worker URL: https://morning-brief-connector.reinier-olivier.workers.dev
+Redirect URI: https://morning-brief-connector.reinier-olivier.workers.dev/auth/callback
+Database ID: e3bc9492-ba89-47bd-868a-5ada13212b0f
+Database Name: mail-connector-db
+Deployment Date: 2026-10-01 15:32:05

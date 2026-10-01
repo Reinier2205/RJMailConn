@@ -1,7 +1,7 @@
-{
+﻿{
   // Cloudflare Workers configuration for Morning Brief Connector
   "name": "morning-brief-connector",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
   "compatibility_date": "2024-01-15",
   "compatibility_flags": ["nodejs_compat"],
   
@@ -14,8 +14,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "morning-brief-db",
-      "database_id": "REPLACE_WITH_ACTUAL_DATABASE_ID",
+      "database_name": "mail-connector-db",
+      "database_id": "e3bc9492-ba89-47bd-868a-5ada13212b0f",
       "migrations_dir": "migrations"
     }
   ],
@@ -67,3 +67,4 @@
     }
   }
 }
+

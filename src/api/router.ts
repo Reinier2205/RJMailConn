@@ -12,7 +12,6 @@ import { DraftHandler } from "./drafts";
 import { CalendarEventHandler } from "./calendar";
 import { BriefHandler } from "./brief";
 import { AuthMiddleware } from "./auth-middleware";
-import { McpHandler } from "../mcp/handler";
 
 export interface AuthValidation {
   valid: boolean;
@@ -21,18 +20,19 @@ export interface AuthValidation {
 
 /**
  * Main API Router Class
+ * 
+ * NOTE: /mcp endpoint now uses OAuth 2.1 and is handled separately in index.ts
+ * All other endpoints continue using Bearer token authentication
  */
 export class APIRouter {
   private readonly env: Environment;
   private readonly oauthHandler: OAuthHandler;
   private readonly authMiddleware: AuthMiddleware;
-  private readonly mcpHandler: McpHandler;
 
   constructor(env: Environment) {
     this.env = env;
     this.oauthHandler = new OAuthHandler(env);
     this.authMiddleware = new AuthMiddleware(env);
-    this.mcpHandler = new McpHandler(env);
   }
 
   /**
@@ -67,8 +67,6 @@ export class APIRouter {
         return await this.handleDraftEndpoints(request, corsHeaders);
       } else if (path === "/brief") {
         return await this.handleBriefEndpoint(request, corsHeaders);
-      } else if (path === "/mcp") {
-        return await this.handleMcpEndpoint(request, corsHeaders);
       } else if (path.startsWith("/health") || path.startsWith("/status") || path === "/version") {
         return await this.handleHealthEndpoints(request, corsHeaders);
       } else {
@@ -397,24 +395,6 @@ export class APIRouter {
         return this.handleError(error, corsHeaders, "Morning brief generation failed");
       }
     });
-  }
-
-  /**
-   * Handle MCP endpoint - Model Context Protocol JSON-RPC 2.0
-   */
-  async handleMcpEndpoint(request: Request, corsHeaders: Record<string, string>): Promise<Response> {
-    // Handle CORS preflight
-    if (request.method === "OPTIONS") {
-      return new Response(null, { 
-        headers: {
-          ...corsHeaders,
-          "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        }
-      });
-    }
-
-    // MCP handler includes authentication validation
-    return await this.mcpHandler.handleRequest(request);
   }
 
   async handleHealthEndpoints(request: Request, corsHeaders: Record<string, string>): Promise<Response> {

@@ -1,65 +1,70 @@
-﻿{
-  // Cloudflare Workers configuration for Morning Brief Connector
-  "name": "morning-brief-connector",
-  "main": "dist/index.js",
-  "compatibility_date": "2024-01-15",
-  "compatibility_flags": ["nodejs_compat"],
-  
-  // Environment configuration
-  "vars": {
-    "ENVIRONMENT": "production"
-  },
-  
-  // D1 Database bindings
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "mail-connector-db",
-      "database_id": "e3bc9492-ba89-47bd-868a-5ada13212b0f",
-      "migrations_dir": "migrations"
-    }
-  ],
-  
-  // Cron triggers for scheduled synchronization
-  "triggers": {
-    "crons": [
-      "0 6 * * *"  // Daily at 6:00 AM UTC (8:00 AM SAST)
-    ]
-  },
-  
-  // Development configuration
-  "dev": {
-    "ip": "localhost",
-    "port": 8787,
-    "local_protocol": "http"
-  },
-  
-  // Environment-specific configurations
-  "env": {
-    "development": {
-      "vars": {
-        "ENVIRONMENT": "development"
-      },
-      "d1_databases": [
-        {
-          "binding": "DB",
-          "database_name": "morning-brief-db-dev",
-          "database_id": "REPLACE_WITH_DEV_DATABASE_ID"
-        }
-      ]
-    },
-    "staging": {
-      "vars": {
-        "ENVIRONMENT": "staging"
-      },
-      "d1_databases": [
-        {
-          "binding": "DB",
-          "database_name": "morning-brief-db-staging", 
-          "database_id": "REPLACE_WITH_STAGING_DATABASE_ID"
-        }
-      ]
-    }
-  }
+{
+	// Cloudflare Workers configuration for Morning Brief Connector
+	"name": "morning-brief-connector",
+	"main": "dist/index.js",
+	"compatibility_date": "2024-01-15",
+	"compatibility_flags": [
+		"nodejs_compat",
+		"global_fetch_strictly_public"
+	],
+	// Environment configuration
+	"vars": {
+		"ENVIRONMENT": "production"
+	},
+	// D1 Database bindings
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "mail-connector-db",
+			"database_id": "e3bc9492-ba89-47bd-868a-5ada13212b0f",
+			"migrations_dir": "migrations"
+		}
+	],
+	// KV namespace for OAuth state (MCP OAuth 2.1)
+	"kv_namespaces": [
+		{
+			"binding": "OAUTH_KV",
+			"id": "f82dd95f5a4a41488fd339a58b6d127b",
+			"remote": true
+		}
+	],
+	// Cron triggers for scheduled synchronization
+	"triggers": {
+		"crons": [
+			"0 6 * * *" // Daily at 6:00 AM UTC (8:00 AM SAST)
+		]
+	},
+	// Development configuration
+	"dev": {
+		"ip": "localhost",
+		"port": 8787,
+		"local_protocol": "http"
+	},
+	// Environment-specific configurations
+	"env": {
+		"development": {
+			"vars": {
+				"ENVIRONMENT": "development"
+			},
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "morning-brief-db-dev",
+					"database_id": "REPLACE_WITH_DEV_DATABASE_ID"
+				}
+			]
+		},
+		"staging": {
+			"vars": {
+				"ENVIRONMENT": "staging"
+			},
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "morning-brief-db-staging",
+					"database_id": "REPLACE_WITH_STAGING_DATABASE_ID"
+				}
+			]
+		}
+	}
 }
-

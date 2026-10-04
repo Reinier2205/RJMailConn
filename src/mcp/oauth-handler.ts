@@ -480,21 +480,26 @@ export function createOAuthMcpHandler(baseUrl: string) {
     
     // MCP API route
     apiRoute: '/mcp',
-    apiHandler: mcpApiHandler as any,
+    apiHandler: {
+      fetch: mcpApiHandler,
+    },
     
     // Default handler for other routes
     defaultHandler: {
       fetch: defaultHandler,
     },
     
-    // OAuth configuration
+    // OAuth configuration - these are the scopes this server can issue
     scopesSupported: ['mcp:read', 'mcp:write', 'offline_access'],
+    
+    // Required scopes for accessing the API
     requiredScopes: ['mcp:read'],
     
-    // Resource metadata for MCP discovery
+    // Resource metadata for MCP discovery (RFC 9728)
     resourceMetadata: {
       resource: `${baseUrl}/mcp`,
       authorization_servers: [baseUrl],
+      bearer_methods_supported: ['header'],
     },
     
     // Enable dynamic client registration for MCP clients

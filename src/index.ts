@@ -54,6 +54,7 @@ export default {
       url.pathname === '/mcp' ||
       url.pathname === '/authorize' ||
       url.pathname === '/oauth/token' ||
+      url.pathname === '/oauth/revoke' ||
       url.pathname === '/oauth/register' ||
       url.pathname === '/.well-known/oauth-protected-resource' ||
       url.pathname === '/.well-known/oauth-authorization-server' ||

@@ -676,12 +676,6 @@ function buildOAuthTestPage(baseUrl: string): string {
       <button id="callMcp" disabled>Call get_morning_brief</button>
     </div>
 
-    <div class="step">
-      <div class="step-title">Step 4: Trigger Sync (Optional)</div>
-      <p>Manually trigger email/calendar sync to get fresh data.</p>
-      <button id="triggerSync" disabled>Trigger Sync</button>
-    </div>
-
     <div id="output" class="output" style="display: none;"></div>
   </div>
 
@@ -830,32 +824,6 @@ function buildOAuthTestPage(baseUrl: string): string {
       }
     });
 
-    document.getElementById('triggerSync').addEventListener('click', async () => {
-      try {
-        log('Triggering manual sync...');
-
-        const response = await fetch(BASE_URL + '/sync', {
-          method: 'POST',
-          headers: {
-            'Authorization': 'Bearer ' + state.accessToken
-          }
-        });
-
-        const data = await response.json();
-        
-        if (response.ok) {
-          log('✅ Sync completed!\\n\\n' + JSON.stringify(data, null, 2));
-          // Re-enable MCP call button
-          document.getElementById('callMcp').disabled = false;
-        } else {
-          log('❌ Sync failed:\\n' + JSON.stringify(data, null, 2), true);
-        }
-        
-      } catch (error) {
-        log('Error: ' + error.message, true);
-      }
-    });
-
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
     const returnedState = urlParams.get('state');
@@ -879,7 +847,6 @@ function buildOAuthTestPage(baseUrl: string): string {
 
     if (state.accessToken) {
       document.getElementById('callMcp').disabled = false;
-      document.getElementById('triggerSync').disabled = false;
     }
   </script>
 </body>

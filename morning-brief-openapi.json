@@ -24,7 +24,15 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "emailData": {
+                    "generated_at": {
+                      "type": "string",
+                      "description": "ISO timestamp when brief was generated"
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "Overall sync status"
+                    },
+                    "emails": {
                       "type": "object",
                       "properties": {
                         "new_messages": {
@@ -54,10 +62,23 @@
                               "body_preview": { "type": "string" }
                             }
                           }
-                        }
+                        },
+                        "marketing_messages": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "subject": { "type": "string" },
+                              "sender_email": { "type": "string" },
+                              "sender_name": { "type": "string" },
+                              "received_at": { "type": "string" }
+                            }
+                          }
+                        },
+                        "unread_count": { "type": "number" }
                       }
                     },
-                    "calendarData": {
+                    "calendar": {
                       "type": "object",
                       "properties": {
                         "today_events": {

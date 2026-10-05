@@ -57,7 +57,10 @@ export class APIRouter {
 
     try {
       // Route to appropriate handler
-      if (path.startsWith("/auth/")) {
+      // Check specific /auth/refresh first before generic /auth/ handler
+      if (path === "/auth/refresh") {
+        return await this.handleTokenRefresh(request, corsHeaders);
+      } else if (path.startsWith("/auth/")) {
         return await this.handleAuthEndpoints(request, corsHeaders);
       } else if (path.startsWith("/email")) {
         return await this.handleEmailEndpoints(request, corsHeaders);
@@ -419,6 +422,75 @@ export class APIRouter {
         );
       } catch (error) {
         return this.handleError(error, corsHeaders, "Manual sync failed");
+      }
+    });
+  }
+
+  async handleTokenRefresh(request: Request, corsHeaders: Record<string, string>): Promise<Response> {
+    return this.authMiddleware.requireAuth(request, corsHeaders, async () => {
+      if (request.method !== "POST") {
+        return this.methodNotAllowed(corsHeaders);
+      }
+
+      try {
+        const { TokenStorage } = await import("../auth/tokens");
+        const tokenStorage = new TokenStorage(this.env);
+        
+        // Get current tokens
+        const tokens = await tokenStorage.getTokens();
+        if (!tokens?.refreshToken) {
+          return new Response(
+            JSON.stringify({ error: "No refresh token available" }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        // Refresh the token
+        const tokenUrl = `https://login.microsoftonline.com/${this.env.TENANT_ID}/oauth2/v2.0/token`;
+        
+        const requestBody = new URLSearchParams({
+          client_id: this.env.CLIENT_ID,
+          client_secret: this.env.CLIENT_SECRET,
+          grant_type: "refresh_token",
+          refresh_token: tokens.refreshToken,
+          scope: tokens.scope
+        });
+
+        const response = await fetch(tokenUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          body: requestBody
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          return new Response(
+            JSON.stringify({ error: "Token refresh failed", details: errorText }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const tokenData = await response.json() as any;
+        
+        // Update stored tokens
+        await tokenStorage.updateAccessToken(
+          tokenData.access_token,
+          new Date(Date.now() + (tokenData.expires_in * 1000))
+        );
+
+        return new Response(
+          JSON.stringify({ 
+            success: true, 
+            expiresIn: tokenData.expires_in,
+            expiresAt: new Date(Date.now() + (tokenData.expires_in * 1000)).toISOString()
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+        
+      } catch (error) {
+        return this.handleError(error, corsHeaders, "Token refresh failed");
       }
     });
   }

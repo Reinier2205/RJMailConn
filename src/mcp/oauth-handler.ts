@@ -227,11 +227,6 @@ async function defaultHandler(
 ): Promise<Response> {
   const url = new URL(request.url);
 
-  // Authorization endpoint
-  if (url.pathname === '/authorize') {
-    return handleAuthorize(request, _env);
-  }
-
   // Root page - information about the service
   if (url.pathname === '/') {
     return new Response(
@@ -267,6 +262,9 @@ async function defaultHandler(
   <p>Authorization endpoint: <code>${url.origin}/authorize</code></p>
   <p>Token endpoint: <code>${url.origin}/oauth/token</code></p>
 
+  <h2>Web Interface</h2>
+  <p><a href="/morning-brief.html">Open Morning Brief Web App</a></p>
+
   <h2>Health Check</h2>
   <p><a href="/health">Check service health</a></p>
 </body>
@@ -284,53 +282,121 @@ async function defaultHandler(
 }
 
 /**
- * Handle authorization endpoint - simple auto-approval for single user
+ * Handle authorization endpoint
+ * 
+ * Note: The actual authorization flow is handled by OAuthProvider.
+ * This function is only called by the defaultHandler for non-OAuth paths.
+ * The /authorize endpoint itself is intercepted by OAuthProvider before reaching here.
  */
 async function handleAuthorize(
   request: Request,
   _env: OAuthEnvironment
 ): Promise<Response> {
-  const url = new URL(request.url);
-
-  // Parse authorization request parameters
-  const clientId = url.searchParams.get('client_id');
-  const redirectUri = url.searchParams.get('redirect_uri');
-  const state = url.searchParams.get('state');
-  const codeChallenge = url.searchParams.get('code_challenge');
-  const codeChallengeMethod = url.searchParams.get('code_challenge_method');
-  const scope = url.searchParams.get('scope');
-  const responseType = url.searchParams.get('response_type');
-
-  // Validate required parameters
-  if (!clientId || !redirectUri || !state || !codeChallenge || !responseType) {
-    return new Response(
-      `
+  // This should not normally be reached since OAuthProvider handles /authorize
+  return new Response(
+    `
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Authorization Error</title>
+  <title>Authorization Handler</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-    .error { background: #ffe7e7; padding: 15px; border-radius: 5px; color: #c00; }
+    .info { background: #e7f3ff; padding: 15px; border-radius: 5px; }
   </style>
 </head>
 <body>
-  <h1>Authorization Error</h1>
-  <div class="error">
-    <p>Missing required OAuth parameters.</p>
-    <p>Required: client_id, redirect_uri, state, code_challenge, response_type</p>
+  <h1>OAuth Authorization</h1>
+  <div class="info">
+    <p>This endpoint is managed by the OAuth provider.</p>
+    <p>If you're seeing this, the OAuth flow may not be configured correctly.</p>
   </div>
 </body>
 </html>
-      `,
-      { status: 400, headers: { 'Content-Type': 'text/html' } }
-    );
-  }
+    `,
+    { status: 200, headers: { 'Content-Type': 'text/html' } }
+  );
+}
 
-  // For single-user scenario, show simple approval page
-  if (request.method === 'GET') {
-    return new Response(
-      `
+/**
+ * HTML escape helper
+ */
+function escapeHtml(unsafe: string): string {
+  return unsafe
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+/**
+ * Create OAuth-protected MCP handler
+ */
+export function createOAuthMcpHandler(baseUrl: string): OAuthProvider<OAuthEnvironment> {
+  const provider: OAuthProvider<OAuthEnvironment> = new OAuthProvider<OAuthEnvironment>({
+    // OAuth endpoints
+    authorizeEndpoint: '/authorize',
+    tokenEndpoint: '/oauth/token',
+    
+    // MCP API route
+    apiRoute: '/mcp',
+    apiHandler: {
+      fetch: mcpApiHandler,
+    },
+    
+    // Default handler for other routes (including /authorize page)
+    defaultHandler: {
+      fetch: async (request: Request, env: OAuthEnvironment, ctx: ExecutionContext): Promise<Response> => {
+        const url = new URL(request.url);
+        
+        // Handle authorization page
+        if (url.pathname === '/authorize') {
+          return handleAuthorizePage(request, env, provider);
+        }
+        
+        // Handle other routes
+        return defaultHandler(request, env, ctx);
+      },
+    },
+    
+    // OAuth configuration - these are the scopes this server can issue
+    scopesSupported: ['mcp:read', 'mcp:write', 'offline_access'],
+    
+    // Required scopes for accessing the API
+    requiredScopes: ['mcp:read'],
+    
+    // Resource metadata for MCP discovery (RFC 9728)
+    resourceMetadata: {
+      resource: `${baseUrl}/mcp`,
+      authorization_servers: [baseUrl],
+      bearer_methods_supported: ['header'],
+    },
+    
+    // Enable dynamic client registration for MCP clients
+    clientIdMetadataDocumentEnabled: true,
+  });
+  
+  return provider;
+}
+
+/**
+ * Handle authorization consent page
+ */
+async function handleAuthorizePage(
+  request: Request,
+  env: OAuthEnvironment,
+  provider: OAuthProvider<OAuthEnvironment>
+): Promise<Response> {
+  const url = new URL(request.url);
+  
+  try {
+    // Parse the authorization request using OAuth provider
+    const authRequest = await provider.parseAuthorizationRequest(request, env);
+    
+    // If GET, show consent page
+    if (request.method === 'GET') {
+      return new Response(
+        `
 <!DOCTYPE html>
 <html>
 <head>
@@ -376,8 +442,8 @@ async function handleAuthorize(
     <p>An application wants to access your Morning Brief</p>
     
     <div class="app-info">
-      <strong>Client:</strong> ${escapeHtml(clientId)}<br>
-      <strong>Redirect:</strong> ${escapeHtml(redirectUri)}
+      <strong>Client:</strong> ${escapeHtml(authRequest.clientId)}<br>
+      <strong>Scopes:</strong> ${escapeHtml(authRequest.scope.join(', '))}
     </div>
 
     <div class="permissions">
@@ -389,15 +455,7 @@ async function handleAuthorize(
       </ul>
     </div>
 
-    <form method="POST">
-      <input type="hidden" name="client_id" value="${escapeHtml(clientId)}">
-      <input type="hidden" name="redirect_uri" value="${escapeHtml(redirectUri)}">
-      <input type="hidden" name="state" value="${escapeHtml(state)}">
-      <input type="hidden" name="code_challenge" value="${escapeHtml(codeChallenge)}">
-      <input type="hidden" name="code_challenge_method" value="${escapeHtml(codeChallengeMethod || 'S256')}">
-      <input type="hidden" name="scope" value="${escapeHtml(scope || 'mcp:read')}">
-      <input type="hidden" name="response_type" value="${escapeHtml(responseType)}">
-      
+    <form method="POST" action="${url.pathname}${url.search}">
       <div class="buttons">
         <button type="submit" name="action" value="approve" class="btn-approve">
           ✓ Approve
@@ -410,99 +468,58 @@ async function handleAuthorize(
   </div>
 </body>
 </html>
-      `,
-      { status: 200, headers: { 'Content-Type': 'text/html' } }
-    );
-  }
-
-  // Handle POST - approval/denial
-  if (request.method === 'POST') {
-    const formData = await request.formData();
-    const action = formData.get('action');
-
-    if (action === 'deny') {
-      // User denied - redirect back with error
-      const denyUrl = new URL(redirectUri);
-      denyUrl.searchParams.set('error', 'access_denied');
-      denyUrl.searchParams.set('state', state);
-      return Response.redirect(denyUrl.toString(), 302);
+        `,
+        { status: 200, headers: { 'Content-Type': 'text/html' } }
+      );
     }
-
-    // User approved - this is where we'd normally use env.OAUTH_PROVIDER.completeAuthorization()
-    // For now, return a placeholder response that tells the user to use the OAuth Provider properly
+    
+    // If POST, process approval/denial
+    if (request.method === 'POST') {
+      const formData = await request.formData();
+      const action = formData.get('action');
+      
+      if (action === 'deny') {
+        // User denied - return error
+        return await provider.completeAuthorization(authRequest, env, {
+          error: 'access_denied',
+          error_description: 'User denied authorization'
+        });
+      }
+      
+      // User approved - complete authorization with user props
+      return await provider.completeAuthorization(authRequest, env, {
+        props: {
+          userId: 'reinier',  // Single user system
+          email: 'reinier@example.com',
+          name: 'Reinier'
+        }
+      });
+    }
+    
+    return new Response('Method not allowed', { status: 405 });
+    
+  } catch (error) {
+    console.error('Authorization error:', error);
     return new Response(
       `
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Authorization Processing</title>
+  <title>Authorization Error</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-    .info { background: #e7f3ff; padding: 15px; border-radius: 5px; }
+    .error { background: #ffe7e7; padding: 15px; border-radius: 5px; color: #c00; }
   </style>
 </head>
 <body>
-  <h1>Authorization Approved</h1>
-  <div class="info">
-    <p>Authorization will be processed by the OAuth provider.</p>
-    <p>This endpoint is managed by <code>@cloudflare/workers-oauth-provider</code></p>
+  <h1>Authorization Error</h1>
+  <div class="error">
+    <p>${escapeHtml(error instanceof Error ? error.message : 'Unknown error')}</p>
   </div>
 </body>
 </html>
       `,
-      { status: 200, headers: { 'Content-Type': 'text/html' } }
+      { status: 400, headers: { 'Content-Type': 'text/html' } }
     );
   }
-
-  return new Response('Method not allowed', { status: 405 });
-}
-
-/**
- * HTML escape helper
- */
-function escapeHtml(unsafe: string): string {
-  return unsafe
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
-/**
- * Create OAuth-protected MCP handler
- */
-export function createOAuthMcpHandler(baseUrl: string) {
-  return new OAuthProvider<OAuthEnvironment>({
-    // OAuth endpoints
-    authorizeEndpoint: '/authorize',
-    tokenEndpoint: '/oauth/token',
-    
-    // MCP API route
-    apiRoute: '/mcp',
-    apiHandler: {
-      fetch: mcpApiHandler,
-    },
-    
-    // Default handler for other routes
-    defaultHandler: {
-      fetch: defaultHandler,
-    },
-    
-    // OAuth configuration - these are the scopes this server can issue
-    scopesSupported: ['mcp:read', 'mcp:write', 'offline_access'],
-    
-    // Required scopes for accessing the API
-    requiredScopes: ['mcp:read'],
-    
-    // Resource metadata for MCP discovery (RFC 9728)
-    resourceMetadata: {
-      resource: `${baseUrl}/mcp`,
-      authorization_servers: [baseUrl],
-      bearer_methods_supported: ['header'],
-    },
-    
-    // Enable dynamic client registration for MCP clients
-    clientIdMetadataDocumentEnabled: true,
-  });
 }

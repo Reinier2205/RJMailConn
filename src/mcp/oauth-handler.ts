@@ -233,6 +233,30 @@ async function defaultHandler(
     return handleAuthorizeConsent(request, env);
   }
 
+  // Client ID Metadata Document (CIMD) - serve at both paths
+  if (url.pathname === '/test-oauth-client' || 
+      url.pathname === '/test-oauth-client/.well-known/oauth-client') {
+    return new Response(
+      JSON.stringify({
+        client_id: `${url.origin}/test-oauth-client`,
+        client_name: 'Morning Brief OAuth Test',
+        redirect_uris: [`${url.origin}/test-oauth`],
+        grant_types: ['authorization_code', 'refresh_token'],
+        response_types: ['code'],
+        token_endpoint_auth_method: 'none',
+        token_endpoint_auth_methods_supported: ['none'],
+      }),
+      {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'public, max-age=3600',
+        },
+      }
+    );
+  }
+
   // OAuth test page
   if (url.pathname === '/test-oauth') {
     return new Response(buildOAuthTestPage(url.origin), {
@@ -652,13 +676,19 @@ function buildOAuthTestPage(baseUrl: string): string {
       <button id="callMcp" disabled>Call get_morning_brief</button>
     </div>
 
+    <div class="step">
+      <div class="step-title">Step 4: Trigger Sync (Optional)</div>
+      <p>Manually trigger email/calendar sync to get fresh data.</p>
+      <button id="triggerSync" disabled>Trigger Sync</button>
+    </div>
+
     <div id="output" class="output" style="display: none;"></div>
   </div>
 
   <script>
     const BASE_URL = '${baseUrl}';
     const REDIRECT_URI = BASE_URL + '/test-oauth';
-    const CLIENT_ID = REDIRECT_URI;
+    const CLIENT_ID = BASE_URL + '/test-oauth-client'; // CIMD client
 
     let state = {
       codeVerifier: null,
@@ -800,6 +830,32 @@ function buildOAuthTestPage(baseUrl: string): string {
       }
     });
 
+    document.getElementById('triggerSync').addEventListener('click', async () => {
+      try {
+        log('Triggering manual sync...');
+
+        const response = await fetch(BASE_URL + '/sync', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + state.accessToken
+          }
+        });
+
+        const data = await response.json();
+        
+        if (response.ok) {
+          log('✅ Sync completed!\\n\\n' + JSON.stringify(data, null, 2));
+          // Re-enable MCP call button
+          document.getElementById('callMcp').disabled = false;
+        } else {
+          log('❌ Sync failed:\\n' + JSON.stringify(data, null, 2), true);
+        }
+        
+      } catch (error) {
+        log('Error: ' + error.message, true);
+      }
+    });
+
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
     const returnedState = urlParams.get('state');
@@ -823,6 +879,7 @@ function buildOAuthTestPage(baseUrl: string): string {
 
     if (state.accessToken) {
       document.getElementById('callMcp').disabled = false;
+      document.getElementById('triggerSync').disabled = false;
     }
   </script>
 </body>
@@ -862,20 +919,9 @@ export function createOAuthMcpHandler(baseUrl: string): any {
       bearer_methods_supported: ['header'],
     },
     
-    // Disable CIMD - use pre-registered clients instead
-    clientIdMetadataDocumentEnabled: false,
+    // Enable CIMD with proper compatibility settings (requires 2024-11-11+ and global_fetch_strictly_public)
+    clientIdMetadataDocumentEnabled: true,
     
-    // Pre-register the test client
-    clients: [
-      {
-        client_id: `${baseUrl}/test-oauth`,
-        client_name: 'Morning Brief OAuth Test',
-        redirect_uris: [`${baseUrl}/test-oauth`],
-        grant_types: ['authorization_code', 'refresh_token'],
-        response_types: ['code'],
-        token_endpoint_auth_method: 'none', // Public client (PKCE required)
-        scope: 'mcp:read mcp:write offline_access',
-      },
-    ],
+    // Removed pre-registered clients - using CIMD instead
   });
 }

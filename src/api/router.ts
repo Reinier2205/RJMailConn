@@ -67,6 +67,8 @@ export class APIRouter {
         return await this.handleDraftEndpoints(request, corsHeaders);
       } else if (path === "/brief") {
         return await this.handleBriefEndpoint(request, corsHeaders);
+      } else if (path === "/sync") {
+        return await this.handleSyncEndpoint(request, corsHeaders);
       } else if (path.startsWith("/health") || path.startsWith("/status") || path === "/version") {
         return await this.handleHealthEndpoints(request, corsHeaders);
       } else {
@@ -393,6 +395,30 @@ export class APIRouter {
         );
       } catch (error) {
         return this.handleError(error, corsHeaders, "Morning brief generation failed");
+      }
+    });
+  }
+
+  async handleSyncEndpoint(request: Request, corsHeaders: Record<string, string>): Promise<Response> {
+    return this.authMiddleware.requireAuth(request, corsHeaders, async () => {
+      if (request.method !== "POST") {
+        return this.methodNotAllowed(corsHeaders);
+      }
+
+      try {
+        const { SyncEngine } = await import("../sync/sync-engine");
+        const syncEngine = new SyncEngine(this.env);
+        const result = await syncEngine.syncAll();
+        
+        return new Response(
+          JSON.stringify(result),
+          { 
+            status: 200, 
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          }
+        );
+      } catch (error) {
+        return this.handleError(error, corsHeaders, "Manual sync failed");
       }
     });
   }

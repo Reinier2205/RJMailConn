@@ -59,7 +59,8 @@ export default {
       url.pathname === '/.well-known/oauth-protected-resource' ||
       url.pathname === '/.well-known/oauth-authorization-server' ||
       url.pathname === '/test-oauth' ||
-      url.pathname === '/test-oauth/.well-known/oauth-client' ||
+      url.pathname === '/test-oauth-client' ||
+      url.pathname === '/test-oauth-client/.well-known/oauth-client' ||
       url.pathname === '/'
     ) {
       // Check if OAUTH_KV is bound

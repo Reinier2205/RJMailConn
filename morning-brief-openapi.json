@@ -1,9 +1,9 @@
 ﻿{
   "openapi": "3.1.0",
   "info": {
-    "title": "Morning Brief Connector API",
-    "description": "Microsoft 365 integration for emails and calendar events",
-    "version": "1.0.0"
+    "title": "Morning Brief",
+    "description": "Reads Reinier's Gmail and Google Calendar. Use getMorningBrief to get emails and calendar events. Use syncNow before getMorningBrief if you want the very latest data. Use createCalendarEvent to add events. Use createEmailDraft to prepare a draft reply (never sends automatically).",
+    "version": "2.0.0"
   },
   "servers": [
     {
@@ -14,52 +14,49 @@
     "/brief": {
       "get": {
         "operationId": "getMorningBrief",
-        "summary": "Get Morning Intelligence Brief",
-        "description": "Retrieves new emails, important emails, today's calendar events, and upcoming events",
+        "summary": "Get emails and calendar",
+        "description": "Returns categorised emails (important, new, marketing) and calendar events (today + next 7 days) from the database. Call syncNow first if you need the very latest data.",
+        "security": [{ "BearerAuth": [] }],
         "responses": {
           "200": {
-            "description": "Successful response with email and calendar data",
+            "description": "Morning brief data",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "generated_at": {
-                      "type": "string",
-                      "description": "ISO timestamp when brief was generated"
-                    },
-                    "status": {
-                      "type": "string",
-                      "description": "Overall sync status"
-                    },
+                    "generated_at": { "type": "string" },
+                    "status": { "type": "string" },
                     "emails": {
                       "type": "object",
                       "properties": {
-                        "new_messages": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "subject": { "type": "string" },
-                              "sender_email": { "type": "string" },
-                              "sender_name": { "type": "string" },
-                              "received_at": { "type": "string" },
-                              "importance": { "type": "string" },
-                              "body_preview": { "type": "string" }
-                            }
-                          }
-                        },
+                        "unread_count": { "type": "number" },
                         "important_messages": {
                           "type": "array",
                           "items": {
                             "type": "object",
                             "properties": {
                               "subject": { "type": "string" },
-                              "sender_email": { "type": "string" },
                               "sender_name": { "type": "string" },
+                              "sender_email": { "type": "string" },
                               "received_at": { "type": "string" },
-                              "importance": { "type": "string" },
-                              "body_preview": { "type": "string" }
+                              "body_preview": { "type": "string" },
+                              "is_read": { "type": "boolean" },
+                              "web_link": { "type": "string" }
+                            }
+                          }
+                        },
+                        "new_messages": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "subject": { "type": "string" },
+                              "sender_name": { "type": "string" },
+                              "sender_email": { "type": "string" },
+                              "received_at": { "type": "string" },
+                              "body_preview": { "type": "string" },
+                              "web_link": { "type": "string" }
                             }
                           }
                         },
@@ -69,13 +66,12 @@
                             "type": "object",
                             "properties": {
                               "subject": { "type": "string" },
-                              "sender_email": { "type": "string" },
                               "sender_name": { "type": "string" },
+                              "sender_email": { "type": "string" },
                               "received_at": { "type": "string" }
                             }
                           }
-                        },
-                        "unread_count": { "type": "number" }
+                        }
                       }
                     },
                     "calendar": {
@@ -90,7 +86,8 @@
                               "start_at": { "type": "string" },
                               "end_at": { "type": "string" },
                               "location": { "type": "string" },
-                              "organiser": { "type": "string" }
+                              "organiser": { "type": "string" },
+                              "response_status": { "type": "string" }
                             }
                           }
                         },
@@ -103,10 +100,52 @@
                               "start_at": { "type": "string" },
                               "end_at": { "type": "string" },
                               "location": { "type": "string" },
-                              "organiser": { "type": "string" }
+                              "organiser": { "type": "string" },
+                              "response_status": { "type": "string" }
                             }
                           }
                         }
+                      }
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sync": {
+      "post": {
+        "operationId": "syncNow",
+        "summary": "Sync latest emails and calendar from Gmail",
+        "description": "Pulls the latest emails and calendar events from Gmail and Google Calendar into the database. Call this before getMorningBrief when the user wants up-to-the-minute data.",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Sync result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "overall": { "type": "string" },
+                    "email": {
+                      "type": "object",
+                      "properties": {
+                        "status": { "type": "string" },
+                        "itemsProcessed": { "type": "number" }
+                      }
+                    },
+                    "calendar": {
+                      "type": "object",
+                      "properties": {
+                        "status": { "type": "string" },
+                        "itemsProcessed": { "type": "number" }
                       }
                     }
                   }
@@ -120,8 +159,9 @@
     "/calendar/events": {
       "post": {
         "operationId": "createCalendarEvent",
-        "summary": "Create a calendar event",
-        "description": "Creates a new event in the user's Microsoft 365 calendar",
+        "summary": "Create a Google Calendar event",
+        "description": "Creates a new event in Reinier's Google Calendar. Always confirm the details with the user before calling this.",
+        "security": [{ "BearerAuth": [] }],
         "requestBody": {
           "required": true,
           "content": {
@@ -130,77 +170,49 @@
                 "type": "object",
                 "required": ["subject", "startTime", "endTime", "timezone"],
                 "properties": {
-                  "subject": { 
-                    "type": "string",
-                    "description": "Event title/subject"
-                  },
-                  "startTime": { 
-                    "type": "string",
-                    "description": "ISO 8601 datetime (e.g., 2024-01-15T09:00:00)"
-                  },
-                  "endTime": { 
-                    "type": "string",
-                    "description": "ISO 8601 datetime (e.g., 2024-01-15T10:00:00)"
-                  },
-                  "timezone": { 
-                    "type": "string",
-                    "description": "IANA timezone (e.g., America/New_York)"
-                  },
-                  "location": { "type": "string" },
-                  "body": { "type": "string" },
-                  "attendees": {
-                    "type": "array",
-                    "items": { "type": "string" }
-                  }
+                  "subject": { "type": "string", "description": "Event title" },
+                  "startTime": { "type": "string", "description": "ISO 8601 e.g. 2026-10-10T09:00:00" },
+                  "endTime":   { "type": "string", "description": "ISO 8601 e.g. 2026-10-10T10:00:00" },
+                  "timezone":  { "type": "string", "description": "IANA timezone e.g. Africa/Johannesburg" },
+                  "location":  { "type": "string" },
+                  "body":      { "type": "string", "description": "Event description" },
+                  "attendees": { "type": "array", "items": { "type": "string" }, "description": "Email addresses of attendees" }
                 }
               }
             }
           }
         },
         "responses": {
-          "201": {
-            "description": "Event created successfully"
-          }
+          "201": { "description": "Event created successfully" }
         }
       }
     },
-    "/drafts/compose": {
+    "/drafts": {
       "post": {
         "operationId": "createEmailDraft",
-        "summary": "Create an email draft",
-        "description": "Creates a new email draft in the user's Microsoft 365 mailbox",
+        "summary": "Save a Gmail draft (does NOT send)",
+        "description": "Creates a draft email in Reinier's Gmail Drafts folder. This NEVER sends the email — the user must open Gmail and send it manually. Always confirm recipient and content before calling.",
+        "security": [{ "BearerAuth": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["to", "subject", "body"],
+                "required": ["subject", "body", "toRecipients"],
                 "properties": {
-                  "to": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Recipient email addresses"
-                  },
-                  "subject": { "type": "string" },
-                  "body": { "type": "string" },
-                  "cc": {
-                    "type": "array",
-                    "items": { "type": "string" }
-                  },
-                  "importance": {
-                    "type": "string",
-                    "enum": ["low", "normal", "high"]
-                  }
+                  "subject":      { "type": "string" },
+                  "body":         { "type": "string", "description": "HTML or plain text body" },
+                  "toRecipients": { "type": "array", "items": { "type": "string" }, "description": "Recipient email addresses" },
+                  "ccRecipients": { "type": "array", "items": { "type": "string" } },
+                  "importance":   { "type": "string", "enum": ["low", "normal", "high"] }
                 }
               }
             }
           }
         },
         "responses": {
-          "201": {
-            "description": "Draft created successfully"
-          }
+          "201": { "description": "Draft saved to Gmail Drafts folder" }
         }
       }
     }
@@ -210,13 +222,9 @@
       "BearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "bearerFormat": "token"
+        "bearerFormat": "API token — enter in ChatGPT Authentication field only, never in this schema"
       }
     }
   },
-  "security": [
-    {
-      "BearerAuth": []
-    }
-  ]
+  "security": [{ "BearerAuth": [] }]
 }

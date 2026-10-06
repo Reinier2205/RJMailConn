@@ -68,12 +68,10 @@ export interface CalendarQueryOptions {
  * Microsoft Graph API Client
  */
 export class GraphClient {
-  private readonly env: Environment;
   private readonly tokenStorage: TokenStorage;
   private readonly baseUrl = "https://graph.microsoft.com/v1.0";
   
   constructor(env: Environment) {
-    this.env = env;
     this.tokenStorage = new TokenStorage(env);
   }
 
@@ -370,38 +368,8 @@ export class GraphClient {
         return { success: false };
       }
 
-      // Manual token refresh using Microsoft endpoint
-      const tokenUrl = `https://login.microsoftonline.com/${this.env.TENANT_ID}/oauth2/v2.0/token`;
-      
-      const requestBody = new URLSearchParams({
-        client_id: this.env.CLIENT_ID,
-        client_secret: this.env.CLIENT_SECRET,
-        grant_type: "refresh_token",
-        refresh_token: tokens.refreshToken,
-        scope: tokens.scope
-      });
-
-      const response = await fetch(tokenUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded"
-        },
-        body: requestBody
-      });
-
-      if (!response.ok) {
-        return { success: false };
-      }
-
-      const tokenData = await response.json() as any;
-      
-      // Update stored tokens
-      await this.tokenStorage.updateAccessToken(
-        tokenData.access_token,
-        new Date(Date.now() + (tokenData.expires_in * 1000))
-      );
-
-      return { success: true };
+      // Microsoft Graph is no longer used - return failure to trigger re-auth
+      return { success: false };
 
     } catch (error) {
       console.error("Token refresh failed:", error);

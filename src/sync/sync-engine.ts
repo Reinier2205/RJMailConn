@@ -1,590 +1,475 @@
 /**
- * Sync Engine - Reliable Email and Calendar Synchronization
- * 
+ * Sync Engine - Reliable Gmail and Google Calendar Synchronization
+ *
  * Orchestrates checkpoint-based synchronization with failure retention,
  * completeness validation, and comprehensive error handling.
  */
 
-import { Environment } from "../index";
-import { GraphClient, RetrievalResult, RetrievalStatus } from "../microsoft/graph";
-import { EmailMessage,  EmailRepository, processBatchMessages } from "../microsoft/email";
-import { SyncSource, CompleteSyncResult, SyncResult, SyncCheckpoint, SyncValidation } from "../database/models";
-import { auditLog } from "../database/audit";
+import { Environment } from '../index';
+import { GmailClient, classifyMessage, RetrievalStatus } from '../google/gmail';
+import { GoogleCalendarClient } from '../google/calendar';
+import { SyncSource, CompleteSyncResult, SyncResult, SyncCheckpoint } from '../database/models';
+import { auditLog } from '../database/audit';
 
-/**
- * Email Synchronization Engine
- */
+interface SyncValidation {
+  isComplete: boolean;
+  isReliable: boolean;
+  recommendedAction: 'proceed' | 'retry' | 'alert';
+  warningMessage?: string;
+}
+
 export class SyncEngine {
   private readonly env: Environment;
-  private readonly graphClient: GraphClient;
+  private readonly gmailClient: GmailClient;
+  private readonly calendarClient: GoogleCalendarClient;
 
   constructor(env: Environment) {
     this.env = env;
-    this.graphClient = new GraphClient(env);
+    this.gmailClient = new GmailClient(env);
+    this.calendarClient = new GoogleCalendarClient(env);
   }
 
-  /**
-   * Synchronize all sources (email and calendar)
-   */
+  // ─── Public API ─────────────────────────────────────────────────────────────
+
   async syncAll(): Promise<CompleteSyncResult> {
     const startTime = new Date().toISOString();
-    
+
     const result: CompleteSyncResult = {
-      overall: "failed",
-      email: {
-        source: "email",
-        status: "failed",
-        itemsProcessed: 0,
-        pagesProcessed: 0,
-        startedAt: startTime,
-        completedAt: startTime,
-        retainedPrevious: false
-      },
-      calendar: {
-        source: "calendar", 
-        status: "failed",
-        itemsProcessed: 0,
-        pagesProcessed: 0,
-        startedAt: startTime,
-        completedAt: startTime,
-        retainedPrevious: false
-      },
-      warnings: []
+      overall: 'failed',
+      email: this.emptyResult('email', startTime),
+      calendar: this.emptyResult('calendar', startTime),
+      warnings: [],
     };
 
     try {
-      // Synchronize email with checkpoint recovery
       result.email = await this.syncEmails();
-      
-      // Synchronize calendar with checkpoint recovery
       result.calendar = await this.syncCalendar();
-      
-      // Determine overall status
       result.overall = this.determineOverallStatus(result.email, result.calendar);
-      
-      // Generate warnings for incomplete results
-      result.warnings = this.generateSyncWarnings(result);
-      
-      // Log complete sync operation
+      result.warnings = this.generateWarnings(result);
+
       await auditLog(this.env.DB, {
-        operation: "sync",
-        resourceType: "sync_state",
+        operation: 'sync',
+        resourceType: 'sync_state',
         resourceId: null,
-        result: result.overall === "complete" ? "success" : (result.overall === "partial" ? "partial" : "failure"),
-        requestedBy: "system",
+        result: result.overall === 'complete' ? 'success' : result.overall === 'partial' ? 'partial' : 'failure',
+        requestedBy: 'system',
         details: {
           emailStatus: result.email.status,
           calendarStatus: result.calendar.status,
           emailItems: result.email.itemsProcessed,
           calendarItems: result.calendar.itemsProcessed,
-          warnings: result.warnings
-        }
+          warnings: result.warnings,
+        },
       });
-      
+
       return result;
-      
     } catch (error) {
-      // Log critical sync failure
       await auditLog(this.env.DB, {
-        operation: "sync",
-        resourceType: "sync_state",
+        operation: 'sync',
+        resourceType: 'sync_state',
         resourceId: null,
-        result: "failure",
-        requestedBy: "system",
-        details: { 
-          error: error instanceof Error ? error.message : "Unknown error",
-          phase: "complete_sync"
-        }
+        result: 'failure',
+        requestedBy: 'system',
+        details: { error: error instanceof Error ? error.message : 'Unknown error', phase: 'complete_sync' },
       });
-      
       throw error;
     }
   }
 
-  /**
-   * Synchronize email messages with checkpoint-based recovery
-   */
   async syncEmails(): Promise<SyncResult> {
     const startTime = new Date().toISOString();
-    let result: SyncResult = {
-      source: "email",
-      status: "failed",
-      itemsProcessed: 0,
-      pagesProcessed: 0,
-      startedAt: startTime,
-      completedAt: startTime,
-      retainedPrevious: false
-    };
+    const result: SyncResult = this.emptyResult('email', startTime);
 
     try {
-      // Update sync attempt timestamp
-      await this.updateSyncAttempt("email");
-      
-      // Get last successful checkpoint
-      const checkpoint = await this.getLastSuccessfulSync("email");
-      
-      // Build query with safety overlap window (1 hour)
-      const safetyOverlap = checkpoint ? new Date(new Date(checkpoint.timestamp).getTime() - 3600000) : null;
-      const query = this.buildEmailQuery(safetyOverlap);
-      
-      // Retrieve emails with complete pagination
-      const retrievalResult = await this.graphClient.getMessages(query);
-      
-      // Validate completeness
-      const validation = this.validateCompleteness(retrievalResult);
-      
+      await this.updateSyncAttempt('email');
+
+      // Safety overlap: go back 1 hour before last successful sync
+      const checkpoint = await this.getLastSuccessfulSync('email');
+      const safetyOverlap = checkpoint
+        ? new Date(new Date(checkpoint.timestamp).getTime() - 3_600_000)
+        : null;
+
+      const retrieval = await this.gmailClient.getMessages(safetyOverlap);
+      const validation = this.validateCompleteness(retrieval);
+
       if (validation.isReliable) {
-        // Process and deduplicate messages
-        const emailRepo = new EmailRepositoryImpl(this.env.DB);
-        const batchResult = await processBatchMessages(retrievalResult.items, emailRepo);
-        
-        // Create new checkpoint on success
+        // Upsert messages into D1
+        let created = 0;
+        let updated = 0;
+
+        for (const msg of retrieval.items) {
+          const classification = classifyMessage(msg);
+          const existing = await this.findByGmailId(msg.id);
+
+          if (existing) {
+            await this.updateMessageLastSeen(msg.id, new Date());
+            updated++;
+          } else {
+            await this.insertMessage(msg, classification);
+            created++;
+          }
+        }
+
+        const itemsProcessed = created + updated;
+
         const newCheckpoint: SyncCheckpoint = {
-          source: "email",
+          source: 'email',
           timestamp: new Date().toISOString(),
-          itemCount: batchResult.processed,
-          cursor: retrievalResult.nextLink || undefined
+          itemCount: itemsProcessed,
         };
-        
-        // Update sync success state
-        await this.saveSyncSuccess("email", newCheckpoint, batchResult.processed, retrievalResult.pagesChecked, validation.isComplete);
-        
-        result = {
-          source: "email",
-          status: validation.isComplete ? "complete" : "partial",
-          itemsProcessed: batchResult.created + batchResult.updated,
-          pagesProcessed: retrievalResult.pagesChecked,
+
+        await this.saveSyncSuccess(
+          'email',
+          newCheckpoint,
+          itemsProcessed,
+          retrieval.pagesChecked,
+          validation.isComplete,
+        );
+
+        return {
+          source: 'email',
+          status: validation.isComplete ? 'complete' : 'partial',
+          itemsProcessed,
+          pagesProcessed: retrieval.pagesChecked,
           startedAt: startTime,
           completedAt: new Date().toISOString(),
           checkpoint: newCheckpoint,
-          retainedPrevious: false
+          retainedPrevious: false,
         };
-        
-      } else {
-        // Failure - retain previous data
-        await this.saveSyncFailure("email", validation.warningMessage || "Sync validation failed");
-        
-        result.retainedPrevious = true;
-        result.status = "failed";
-        result.completedAt = new Date().toISOString();
       }
-      
-      return result;
-      
+
+      // Unreliable result - retain previous data
+      await this.saveSyncFailure('email', validation.warningMessage ?? 'Sync validation failed');
+      return { ...result, status: 'failed', retainedPrevious: true, completedAt: new Date().toISOString() };
+
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      
-      // Save failure state
-      await this.saveSyncFailure("email", errorMessage);
-      
-      result.retainedPrevious = true;
-      result.status = "failed";
-      result.completedAt = new Date().toISOString();
-      result.error = {
-        code: "SYNC_ERROR",
-        message: errorMessage,
-        type: "permanent",
-        retryable: false
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      await this.saveSyncFailure('email', msg);
+      return {
+        ...result,
+        status: 'failed',
+        retainedPrevious: true,
+        completedAt: new Date().toISOString(),
+        error: { code: 'SYNC_ERROR', message: msg, type: 'permanent', retryable: false },
       };
-      
-      return result;
     }
   }
 
-  /**
-   * Synchronize calendar events (placeholder - will be implemented in Phase 7)
-   */
   async syncCalendar(): Promise<SyncResult> {
     const startTime = new Date().toISOString();
-    
-    // TODO: Implement calendar synchronization in Phase 7
-    return {
-      source: "calendar",
-      status: "complete",
-      itemsProcessed: 0,
-      pagesProcessed: 0,
-      startedAt: startTime,
-      completedAt: new Date().toISOString(),
-      retainedPrevious: false
-    };
+    const result: SyncResult = this.emptyResult('calendar', startTime);
+
+    try {
+      await this.updateSyncAttempt('calendar');
+
+      // Fetch events: today → 30 days ahead
+      const now = new Date();
+      const thirtyDaysAhead = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      const retrieval = await this.calendarClient.getEvents(now, thirtyDaysAhead);
+      const validation = this.validateCompleteness(retrieval);
+
+      if (validation.isReliable) {
+        let created = 0;
+        let updated = 0;
+
+        for (const event of retrieval.items) {
+          const existing = await this.findCalendarEventByGoogleId(event.id);
+          if (existing) {
+            await this.updateCalendarEvent(event);
+            updated++;
+          } else {
+            await this.insertCalendarEvent(event);
+            created++;
+          }
+        }
+
+        const itemsProcessed = created + updated;
+
+        const newCheckpoint: SyncCheckpoint = {
+          source: 'calendar',
+          timestamp: new Date().toISOString(),
+          itemCount: itemsProcessed,
+        };
+
+        await this.saveSyncSuccess(
+          'calendar',
+          newCheckpoint,
+          itemsProcessed,
+          retrieval.pagesChecked,
+          validation.isComplete,
+        );
+
+        return {
+          source: 'calendar',
+          status: validation.isComplete ? 'complete' : 'partial',
+          itemsProcessed,
+          pagesProcessed: retrieval.pagesChecked,
+          startedAt: startTime,
+          completedAt: new Date().toISOString(),
+          checkpoint: newCheckpoint,
+          retainedPrevious: false,
+        };
+      }
+
+      await this.saveSyncFailure('calendar', validation.warningMessage ?? 'Sync validation failed');
+      return { ...result, status: 'failed', retainedPrevious: true, completedAt: new Date().toISOString() };
+
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      await this.saveSyncFailure('calendar', msg);
+      return {
+        ...result,
+        status: 'failed',
+        retainedPrevious: true,
+        completedAt: new Date().toISOString(),
+        error: { code: 'SYNC_ERROR', message: msg, type: 'permanent', retryable: false },
+      };
+    }
   }
 
-  /**
-   * Get last successful sync checkpoint
-   */
+  // ─── Checkpoint helpers ──────────────────────────────────────────────────────
+
   async getLastSuccessfulSync(source: SyncSource): Promise<SyncCheckpoint | null> {
     try {
-      const stmt = this.env.DB.prepare(`
-        SELECT last_success_at, last_success_cursor, messages_checked, events_checked
-        FROM sync_state 
-        WHERE source = ? AND last_success_at IS NOT NULL
-        ORDER BY last_success_at DESC
-        LIMIT 1
-      `);
-      
-      const result = await stmt.bind(source).first();
-      
-      if (!result) {
-        return null;
-      }
-      
+      const result = await this.env.DB
+        .prepare(`SELECT last_success_at, last_success_cursor, messages_checked, events_checked
+                  FROM sync_state WHERE source = ? AND last_success_at IS NOT NULL
+                  ORDER BY last_success_at DESC LIMIT 1`)
+        .bind(source)
+        .first();
+
+      if (!result) return null;
+
       return {
         source,
         timestamp: result.last_success_at as string,
         cursor: result.last_success_cursor as string | undefined,
-        itemCount: source === "email" ? (result.messages_checked as number) : (result.events_checked as number)
+        itemCount: source === 'email'
+          ? (result.messages_checked as number)
+          : (result.events_checked as number),
       };
-      
-    } catch (error) {
-      console.error(`Failed to get last successful sync for ${source}:`, error);
+    } catch {
       return null;
     }
   }
 
-  /**
-   * Validate sync completeness and reliability
-   */
-  validateCompleteness<T>(result: RetrievalResult<T>): SyncValidation {
-    const validation: SyncValidation = {
-      isComplete: result.status === "complete" && result.paginationComplete,
-      isReliable: false,
-      recommendedAction: "proceed"
-    };
-    
+  // ─── Completeness validation ─────────────────────────────────────────────────
+
+  validateCompleteness(result: { status: RetrievalStatus; itemsChecked: number; pagesChecked: number; paginationComplete: boolean }): SyncValidation {
     switch (result.status) {
-      case "complete":
-        validation.isReliable = true;
-        validation.isComplete = result.paginationComplete;
-        break;
-        
-      case "partial":
-        validation.isReliable = result.itemsChecked > 0;
-        validation.isComplete = false;
-        validation.warningMessage = `Sync incomplete: processed ${result.itemsChecked} items from ${result.pagesChecked} pages`;
-        validation.recommendedAction = "retry";
-        break;
-        
-      case "unauthorized":
-        validation.isReliable = false;
-        validation.warningMessage = "Authentication failed - token refresh required";
-        validation.recommendedAction = "alert";
-        break;
-        
-      case "rate_limited":
-        validation.isReliable = false;
-        validation.warningMessage = "Rate limited by Microsoft Graph API";
-        validation.recommendedAction = "retry";
-        break;
-        
-      case "source_unavailable":
-        validation.isReliable = false;
-        validation.warningMessage = "Microsoft Graph API temporarily unavailable";
-        validation.recommendedAction = "retry";
-        break;
-        
+      case 'complete':
+        return { isComplete: result.paginationComplete, isReliable: true, recommendedAction: 'proceed' };
+      case 'partial':
+        return {
+          isComplete: false, isReliable: result.itemsChecked > 0,
+          warningMessage: `Sync incomplete: processed ${result.itemsChecked} items from ${result.pagesChecked} pages`,
+          recommendedAction: 'retry',
+        };
+      case 'unauthorized':
+        return { isComplete: false, isReliable: false, warningMessage: 'Authentication failed - re-login required', recommendedAction: 'alert' };
+      case 'rate_limited':
+        return { isComplete: false, isReliable: false, warningMessage: 'Rate limited by Google APIs', recommendedAction: 'retry' };
+      case 'source_unavailable':
+        return { isComplete: false, isReliable: false, warningMessage: 'Google API temporarily unavailable', recommendedAction: 'retry' };
       default:
-        validation.isReliable = false;
-        validation.warningMessage = "Sync failed with unknown error";
-        validation.recommendedAction = "alert";
+        return { isComplete: false, isReliable: false, warningMessage: 'Sync failed with unknown error', recommendedAction: 'alert' };
     }
-    
-    return validation;
   }
 
-  /**
-   * Update sync attempt timestamp
-   */
+  // ─── D1 email helpers ────────────────────────────────────────────────────────
+
+  private async findByGmailId(gmailId: string): Promise<boolean> {
+    const row = await this.env.DB
+      .prepare('SELECT id FROM email_messages WHERE graph_message_id = ?')
+      .bind(gmailId)
+      .first();
+    return !!row;
+  }
+
+  private async updateMessageLastSeen(gmailId: string, ts: Date): Promise<void> {
+    await this.env.DB
+      .prepare('UPDATE email_messages SET last_seen_at = ? WHERE graph_message_id = ?')
+      .bind(ts.toISOString(), gmailId)
+      .run();
+  }
+
+  private async insertMessage(
+    msg: import('../google/gmail').GmailMessage,
+    classification: string,
+  ): Promise<void> {
+    const id = `gmail-${msg.id}`;
+    await this.env.DB.prepare(`
+      INSERT INTO email_messages (
+        id, graph_message_id, conversation_id, internet_message_id,
+        received_at, sender_email, sender_name, subject,
+        is_read, importance, has_attachments, classification,
+        body_preview, web_link, first_seen_at, last_seen_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      id,
+      msg.id,
+      msg.threadId,
+      msg.internetMessageId,
+      msg.receivedAt.toISOString(),
+      msg.senderEmail,
+      msg.senderName,
+      msg.subject,
+      msg.isRead ? 1 : 0,
+      msg.importance,
+      msg.hasAttachments ? 1 : 0,
+      classification,
+      msg.bodyPreview,
+      msg.webLink,
+      msg.receivedAt.toISOString(),
+      msg.receivedAt.toISOString(),
+    ).run();
+  }
+
+  // ─── D1 calendar helpers ─────────────────────────────────────────────────────
+
+  private async findCalendarEventByGoogleId(googleId: string): Promise<boolean> {
+    const row = await this.env.DB
+      .prepare('SELECT id FROM calendar_events WHERE graph_event_id = ?')
+      .bind(googleId)
+      .first();
+    return !!row;
+  }
+
+  private async insertCalendarEvent(event: import('../google/calendar').CalendarEvent): Promise<void> {
+    const id = `gcal-${event.id}`;
+    await this.env.DB.prepare(`
+      INSERT INTO calendar_events (
+        id, graph_event_id, subject, start_at, end_at, timezone,
+        location, organiser, response_status, is_cancelled,
+        body_preview, first_seen_at, last_seen_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      id,
+      event.id,
+      event.subject,
+      event.startAt.toISOString(),
+      event.endAt.toISOString(),
+      event.timezone,
+      event.location,
+      event.organiser,
+      event.responseStatus,
+      event.isCancelled ? 1 : 0,
+      event.bodyPreview,
+      new Date().toISOString(),
+      new Date().toISOString(),
+    ).run();
+  }
+
+  private async updateCalendarEvent(event: import('../google/calendar').CalendarEvent): Promise<void> {
+    await this.env.DB.prepare(`
+      UPDATE calendar_events SET
+        subject = ?, start_at = ?, end_at = ?, timezone = ?,
+        location = ?, organiser = ?, response_status = ?,
+        is_cancelled = ?, body_preview = ?, last_seen_at = ?
+      WHERE graph_event_id = ?
+    `).bind(
+      event.subject,
+      event.startAt.toISOString(),
+      event.endAt.toISOString(),
+      event.timezone,
+      event.location,
+      event.organiser,
+      event.responseStatus,
+      event.isCancelled ? 1 : 0,
+      event.bodyPreview,
+      new Date().toISOString(),
+      event.id,
+    ).run();
+  }
+
+  // ─── Sync state persistence ──────────────────────────────────────────────────
+
   private async updateSyncAttempt(source: SyncSource): Promise<void> {
-    try {
-      const stmt = this.env.DB.prepare(`
-        INSERT OR REPLACE INTO sync_state (
-          id, source, last_attempt_at, status, messages_checked, 
-          events_checked, pages_checked, pagination_complete, updated_at
-        ) VALUES (?, ?, datetime('now'), 'failed', 0, 0, 0, 0, datetime('now'))
-      `);
-      
-      await stmt.bind(`${source}-sync-state`, source).run();
-      
-    } catch (error) {
-      console.error(`Failed to update sync attempt for ${source}:`, error);
-    }
+    await this.env.DB.prepare(`
+      INSERT OR REPLACE INTO sync_state (
+        id, source, last_attempt_at, status,
+        messages_checked, events_checked, pages_checked, pagination_complete, updated_at
+      ) VALUES (?, ?, datetime('now'), 'failed', 0, 0, 0, 0, datetime('now'))
+    `).bind(`${source}-sync-state`, source).run();
   }
 
-  /**
-   * Save successful sync state
-   */
   private async saveSyncSuccess(
     source: SyncSource,
     checkpoint: SyncCheckpoint,
     itemsProcessed: number,
     pagesProcessed: number,
-    isComplete: boolean
+    isComplete: boolean,
   ): Promise<void> {
-    try {
-      const stmt = this.env.DB.prepare(`
-        UPDATE sync_state 
-        SET 
-          last_success_at = datetime('now'),
-          last_success_cursor = ?,
-          status = ?,
-          error_code = NULL,
-          error_message = NULL,
-          messages_checked = ?,
-          events_checked = ?,
-          pages_checked = ?,
-          pagination_complete = ?,
-          updated_at = datetime('now')
-        WHERE id = ?
-      `);
-      
-      const status = isComplete ? "complete" : "partial";
-      const messagesChecked = source === "email" ? itemsProcessed : 0;
-      const eventsChecked = source === "calendar" ? itemsProcessed : 0;
-      
-      await stmt.bind(
-        checkpoint.cursor,
-        status,
-        messagesChecked,
-        eventsChecked,
-        pagesProcessed,
-        isComplete ? 1 : 0,
-        `${source}-sync-state`
-      ).run();
-      
-    } catch (error) {
-      console.error(`Failed to save sync success for ${source}:`, error);
-    }
-  }
-
-  /**
-   * Save failed sync state
-   */
-  private async saveSyncFailure(source: SyncSource, errorMessage: string): Promise<void> {
-    try {
-      const stmt = this.env.DB.prepare(`
-        UPDATE sync_state 
-        SET 
-          status = 'failed',
-          error_code = 'SYNC_FAILED',
-          error_message = ?,
-          pagination_complete = 0,
-          updated_at = datetime('now')
-        WHERE id = ?
-      `);
-      
-      await stmt.bind(errorMessage, `${source}-sync-state`).run();
-      
-    } catch (error) {
-      console.error(`Failed to save sync failure for ${source}:`, error);
-    }
-  }
-
-  /**
-   * Build email query with safety overlap
-   */
-  private buildEmailQuery(safetyOverlap: Date | null) {
-    const query: any = {
-      top: 50,
-      orderBy: "receivedDateTime desc"
-    };
-    
-    if (safetyOverlap) {
-      query.from = safetyOverlap;
-    }
-    
-    return query;
-  }
-
-  /**
-   * Determine overall sync status
-   */
-  private determineOverallStatus(email: SyncResult, calendar: SyncResult): RetrievalStatus {
-    if (email.status === "failed" || calendar.status === "failed") {
-      return "failed";
-    }
-    
-    if (email.status === "unauthorized" || calendar.status === "unauthorized") {
-      return "unauthorized";
-    }
-    
-    if (email.status === "rate_limited" || calendar.status === "rate_limited") {
-      return "rate_limited";
-    }
-    
-    if (email.status === "source_unavailable" || calendar.status === "source_unavailable") {
-      return "source_unavailable";
-    }
-    
-    if (email.status === "partial" || calendar.status === "partial") {
-      return "partial";
-    }
-    
-    return "complete";
-  }
-
-  /**
-   * Generate sync warnings
-   */
-  private generateSyncWarnings(result: CompleteSyncResult): string[] {
-    const warnings: string[] = [];
-    
-    if (result.email.status !== "complete") {
-      warnings.push(`Email sync incomplete (${result.email.status}): Only ${result.email.itemsProcessed} messages processed`);
-    }
-    
-    if (result.calendar.status !== "complete") {
-      warnings.push(`Calendar sync incomplete (${result.calendar.status}): Only ${result.calendar.itemsProcessed} events processed`);
-    }
-    
-    if (result.email.retainedPrevious) {
-      warnings.push("Email sync failed - previous email data retained");
-    }
-    
-    if (result.calendar.retainedPrevious) {
-      warnings.push("Calendar sync failed - previous calendar data retained");
-    }
-    
-    return warnings;
-  }
-}
-
-/**
- * Email Repository Implementation
- */
-class EmailRepositoryImpl implements EmailRepository {
-  constructor(private readonly db: D1Database) {}
-
-  async create(message: EmailMessage): Promise<void> {
-    const stmt = this.db.prepare(`
-      INSERT INTO email_messages (
-        id, graph_message_id, conversation_id, internet_message_id,
-        received_at, sender_email, sender_name, subject, is_read,
-        importance, has_attachments, classification, body_preview,
-        web_link, first_seen_at, last_seen_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    
-    await stmt.bind(
-      message.id,
-      message.graph_message_id,
-      message.conversation_id,
-      message.internet_message_id,
-      message.received_at.toISOString(),
-      message.sender_email,
-      message.sender_name,
-      message.subject,
-      message.is_read ? 1 : 0,
-      message.importance,
-      message.has_attachments ? 1 : 0,
-      message.classification,
-      message.body_preview,
-      message.web_link,
-      message.first_seen_at.toISOString(),
-      message.last_seen_at.toISOString()
+    await this.env.DB.prepare(`
+      UPDATE sync_state SET
+        last_success_at = datetime('now'),
+        last_success_cursor = ?,
+        status = ?,
+        error_code = NULL,
+        error_message = NULL,
+        messages_checked = ?,
+        events_checked = ?,
+        pages_checked = ?,
+        pagination_complete = ?,
+        updated_at = datetime('now')
+      WHERE id = ?
+    `).bind(
+      checkpoint.cursor ?? null,
+      isComplete ? 'complete' : 'partial',
+      source === 'email' ? itemsProcessed : 0,
+      source === 'calendar' ? itemsProcessed : 0,
+      pagesProcessed,
+      isComplete ? 1 : 0,
+      `${source}-sync-state`,
     ).run();
   }
 
-  async findByGraphId(graphMessageId: string): Promise<EmailMessage | null> {
-    const stmt = this.db.prepare(`
-      SELECT * FROM email_messages WHERE graph_message_id = ?
-    `);
-    
-    const result = await stmt.bind(graphMessageId).first();
-    
-    if (!result) {
-      return null;
-    }
-    
-    return this.mapRowToMessage(result);
+  private async saveSyncFailure(source: SyncSource, errorMessage: string): Promise<void> {
+    await this.env.DB.prepare(`
+      UPDATE sync_state SET
+        status = 'failed',
+        error_code = 'SYNC_FAILED',
+        error_message = ?,
+        pagination_complete = 0,
+        updated_at = datetime('now')
+      WHERE id = ?
+    `).bind(errorMessage, `${source}-sync-state`).run();
   }
 
-  async updateLastSeen(graphMessageId: string, timestamp: Date): Promise<void> {
-    const stmt = this.db.prepare(`
-      UPDATE email_messages 
-      SET last_seen_at = ?
-      WHERE graph_message_id = ?
-    `);
-    
-    await stmt.bind(timestamp.toISOString(), graphMessageId).run();
-  }
+  // ─── Utility ─────────────────────────────────────────────────────────────────
 
-  async updateClassification(graphMessageId: string, classification: any): Promise<void> {
-    const stmt = this.db.prepare(`
-      UPDATE email_messages 
-      SET classification = ?
-      WHERE graph_message_id = ?
-    `);
-    
-    await stmt.bind(classification, graphMessageId).run();
-  }
-
-  async findRecent(limit: number, offset = 0): Promise<EmailMessage[]> {
-    const stmt = this.db.prepare(`
-      SELECT * FROM email_messages 
-      ORDER BY received_at DESC 
-      LIMIT ? OFFSET ?
-    `);
-    
-    const result = await stmt.bind(limit, offset).all();
-    return (result.results || []).map(row => this.mapRowToMessage(row));
-  }
-
-  async findUnread(limit: number, offset = 0): Promise<EmailMessage[]> {
-    const stmt = this.db.prepare(`
-      SELECT * FROM email_messages 
-      WHERE is_read = 0
-      ORDER BY received_at DESC 
-      LIMIT ? OFFSET ?
-    `);
-    
-    const result = await stmt.bind(limit, offset).all();
-    return (result.results || []).map(row => this.mapRowToMessage(row));
-  }
-
-  async findByClassification(classification: any, limit: number, offset = 0): Promise<EmailMessage[]> {
-    const stmt = this.db.prepare(`
-      SELECT * FROM email_messages 
-      WHERE classification = ?
-      ORDER BY received_at DESC 
-      LIMIT ? OFFSET ?
-    `);
-    
-    const result = await stmt.bind(classification, limit, offset).all();
-    return (result.results || []).map(row => this.mapRowToMessage(row));
-  }
-
-  async count(): Promise<number> {
-    const stmt = this.db.prepare(`SELECT COUNT(*) as count FROM email_messages`);
-    const result = await stmt.first();
-    return (result?.count as number) || 0;
-  }
-
-  async countByClassification(classification: any): Promise<number> {
-    const stmt = this.db.prepare(`
-      SELECT COUNT(*) as count FROM email_messages WHERE classification = ?
-    `);
-    const result = await stmt.bind(classification).first();
-    return (result?.count as number) || 0;
-  }
-
-  private mapRowToMessage(row: any): EmailMessage {
+  private emptyResult(source: SyncSource, startTime: string): SyncResult {
     return {
-      id: row.id,
-      graph_message_id: row.graph_message_id,
-      conversation_id: row.conversation_id,
-      internet_message_id: row.internet_message_id,
-      received_at: new Date(row.received_at),
-      sender_email: row.sender_email,
-      sender_name: row.sender_name,
-      subject: row.subject,
-      is_read: Boolean(row.is_read),
-      importance: row.importance,
-      has_attachments: Boolean(row.has_attachments),
-      classification: row.classification,
-      body_preview: row.body_preview,
-      web_link: row.web_link,
-      first_seen_at: new Date(row.first_seen_at),
-      last_seen_at: new Date(row.last_seen_at)
+      source,
+      status: 'failed',
+      itemsProcessed: 0,
+      pagesProcessed: 0,
+      startedAt: startTime,
+      completedAt: startTime,
+      retainedPrevious: false,
     };
+  }
+
+  private determineOverallStatus(email: SyncResult, calendar: SyncResult): RetrievalStatus {
+    const statuses = [email.status, calendar.status];
+    if (statuses.includes('unauthorized')) return 'unauthorized';
+    if (statuses.includes('rate_limited')) return 'rate_limited';
+    if (statuses.includes('source_unavailable')) return 'source_unavailable';
+    if (statuses.includes('failed')) return 'failed';
+    if (statuses.includes('partial')) return 'partial';
+    return 'complete';
+  }
+
+  private generateWarnings(result: CompleteSyncResult): string[] {
+    const warnings: string[] = [];
+    if (result.email.status !== 'complete')
+      warnings.push(`Email sync incomplete (${result.email.status}): Only ${result.email.itemsProcessed} messages processed`);
+    if (result.calendar.status !== 'complete')
+      warnings.push(`Calendar sync incomplete (${result.calendar.status}): Only ${result.calendar.itemsProcessed} events processed`);
+    if (result.email.retainedPrevious)
+      warnings.push('Email sync failed - previous email data retained');
+    if (result.calendar.retainedPrevious)
+      warnings.push('Calendar sync failed - previous calendar data retained');
+    return warnings;
   }
 }

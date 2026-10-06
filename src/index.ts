@@ -1,10 +1,9 @@
 ﻿/**
  * Morning Brief Connector - Main Entry Point
- * 
- * Production-quality Microsoft 365 connector for Reinier's Morning Intelligence Brief.
- * Provides secure OAuth authentication, reliable data synchronization, and API endpoints
- * for email and calendar integration.
- * 
+ *
+ * Gmail + Google Calendar connector for Reinier's Morning Intelligence Brief.
+ * Provides secure OAuth authentication, reliable data synchronization, and API endpoints.
+ *
  * AUTHENTICATION:
  * - REST endpoints (/brief, /calendar, /drafts): Bearer token (CONNECTOR_API_TOKEN)
  * - MCP endpoint (/mcp): OAuth 2.1 with PKCE
@@ -21,35 +20,37 @@ import { createOAuthMcpHandler } from './mcp/oauth-handler';
 export interface Environment {
   // D1 Database binding
   DB: D1Database;
-  
-  // Secrets (managed via Cloudflare dashboard)
-  CLIENT_ID: string;
-  CLIENT_SECRET: string;
-  TENANT_ID: string;
+
+  // Google OAuth secrets (managed via Cloudflare dashboard / wrangler secret put)
+  GOOGLE_CLIENT_ID: string;
+  GOOGLE_CLIENT_SECRET: string;
+
+  // API access token for REST endpoints
   CONNECTOR_API_TOKEN: string;
+
+  // HMAC secret for OAuth state parameter
   OAUTH_STATE_SECRET: string;
-  
-  // Environment variables
+
+  // Static env var
   ENVIRONMENT: 'development' | 'staging' | 'production';
-  
-  // OAuth KV binding (for MCP OAuth state)
+
+  // KV namespace for MCP OAuth 2.1 state
   OAUTH_KV?: KVNamespace;
 }
 
 // Create OAuth-protected MCP handler
-const oauthMcpHandler = createOAuthMcpHandler('https://morning-brief-connector.reinier-olivier.workers.dev');
+const oauthMcpHandler = createOAuthMcpHandler(
+  'https://morning-brief-connector.reinier-olivier.workers.dev',
+);
 
-/**
- * Main request handler for Cloudflare Workers
- */
 export default {
   /**
    * Handle HTTP requests
    */
   async fetch(request: Request, env: Environment, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    
-    // Route MCP and OAuth endpoints to OAuth handler
+
+    // Route MCP and OAuth 2.1 discovery endpoints to the OAuth handler
     if (
       url.pathname === '/mcp' ||
       url.pathname === '/authorize' ||
@@ -63,32 +64,25 @@ export default {
       url.pathname === '/test-oauth-client/.well-known/oauth-client' ||
       url.pathname === '/'
     ) {
-      // Check if OAUTH_KV is bound
       if (!env.OAUTH_KV) {
         return new Response(
           JSON.stringify({
             error: 'OAuth KV namespace not configured',
-            message: 'OAUTH_KV binding is required for MCP OAuth. Please bind a KV namespace.',
+            message: 'OAUTH_KV binding is required for MCP OAuth.',
           }),
-          {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-          }
+          { status: 500, headers: { 'Content-Type': 'application/json' } },
         );
       }
-      
       return oauthMcpHandler.fetch(request, { ...env, OAUTH_KV: env.OAUTH_KV }, ctx);
     }
-    
-    // All other endpoints go through existing REST API router
+
+    // All other endpoints go through the REST API router
     try {
       const apiRouter = new APIRouter(env);
       return await apiRouter.handleRequest(request);
-      
     } catch (error) {
       console.error('Unhandled request error:', error);
-      
-      // Log critical errors to audit trail
+
       try {
         await auditLog(env.DB, {
           operation: 'request',
@@ -96,47 +90,40 @@ export default {
           resourceId: null,
           result: 'failure',
           requestedBy: 'system',
-          details: { 
+          details: {
             error: error instanceof Error ? error.message : 'Unknown error',
             url: request.url,
-            method: request.method
-          }
+            method: request.method,
+          },
         });
-      } catch (auditError) {
-        console.error('Failed to log audit entry:', auditError);
+      } catch {
+        // audit failure must not mask original error
       }
-      
+
       return new Response(
-        JSON.stringify({ 
-          error: 'Internal server error',
-          message: 'An unexpected error occurred'
-        }), 
-        { 
-          status: 500,
-          headers: { 'Content-Type': 'application/json' }
-        }
+        JSON.stringify({ error: 'Internal server error', message: 'An unexpected error occurred' }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } },
       );
     }
   },
 
   /**
-   * Handle scheduled events (Cron triggers)
+   * Handle scheduled cron events
    */
   async scheduled(event: ScheduledEvent, env: Environment, _ctx: ExecutionContext): Promise<void> {
     try {
       console.log('Scheduled sync triggered:', event.scheduledTime);
-      
+
       const syncEngine = new SyncEngine(env);
       const result = await syncEngine.syncAll();
-      
+
       console.log('Scheduled sync completed:', {
         overall: result.overall,
         email: result.email.status,
         calendar: result.calendar.status,
-        warnings: result.warnings
+        warnings: result.warnings,
       });
-      
-      // Log sync completion to audit trail
+
       await auditLog(env.DB, {
         operation: 'sync',
         resourceType: 'sync_state',
@@ -149,14 +136,12 @@ export default {
           calendarStatus: result.calendar.status,
           emailItems: result.email.itemsProcessed,
           calendarItems: result.calendar.itemsProcessed,
-          warnings: result.warnings
-        }
+          warnings: result.warnings,
+        },
       });
-      
     } catch (error) {
       console.error('Scheduled sync failed:', error);
-      
-      // Log sync failure to audit trail
+
       try {
         await auditLog(env.DB, {
           operation: 'sync',
@@ -164,22 +149,16 @@ export default {
           resourceId: null,
           result: 'failure',
           requestedBy: 'scheduler',
-          details: { 
+          details: {
             error: error instanceof Error ? error.message : 'Unknown error',
-            scheduledTime: event.scheduledTime
-          }
+            scheduledTime: event.scheduledTime,
+          },
         });
-      } catch (auditError) {
-        console.error('Failed to log sync failure:', auditError);
+      } catch {
+        // audit failure must not mask original error
       }
-      
-      // Re-throw to ensure Cloudflare Workers marks the execution as failed
+
       throw error;
     }
-  }
+  },
 };
-
-/**
- * Export types for external usage
- */
-// Exported above

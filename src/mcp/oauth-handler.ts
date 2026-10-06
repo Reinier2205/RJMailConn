@@ -1,4 +1,4 @@
-/**
+﻿/**
  * MCP OAuth Handler - OAuth 2.1 Protected MCP Endpoint
  * 
  * Provides OAuth 2.1 authentication for the MCP endpoint using
@@ -586,276 +586,240 @@ function escapeHtml(unsafe: string): string {
  */
 function buildOAuthTestPage(baseUrl: string): string {
   return `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>OAuth 2.1 Flow Test - Morning Brief Connector</title>
-  <style>
-    body {
-      font-family: system-ui, sans-serif;
-      max-width: 800px;
-      margin: 50px auto;
-      padding: 20px;
-      background: #f5f5f5;
-    }
-    .card {
-      background: white;
-      padding: 30px;
-      border-radius: 8px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      margin-bottom: 20px;
-    }
-    h1 { margin-top: 0; }
-    button {
-      background: #3b82f6;
-      color: white;
-      padding: 12px 24px;
-      border: none;
-      border-radius: 5px;
-      font-size: 16px;
-      cursor: pointer;
-      font-weight: 500;
-    }
-    button:hover {
-      background: #2563eb;
-    }
-    button:disabled {
-      background: #9ca3af;
-      cursor: not-allowed;
-    }
-    .output {
-      background: #f9fafb;
-      padding: 15px;
-      border-radius: 5px;
-      font-family: monospace;
-      font-size: 14px;
-      overflow-x: auto;
-      margin-top: 15px;
-      max-height: 400px;
-      overflow-y: auto;
-    }
-    .success {
-      background: #f0fdf4;
-      border-left: 4px solid #10b981;
-    }
-    .error {
-      background: #fef2f2;
-      border-left: 4px solid #ef4444;
-    }
-    .step {
-      margin: 15px 0;
-      padding: 10px;
-      border-radius: 5px;
-    }
-    .step-title {
-      font-weight: bold;
-      margin-bottom: 10px;
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Morning Brief</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
+a{color:inherit;text-decoration:none}
+/* header */
+header{background:linear-gradient(135deg,#1e3a5f,#0f172a);padding:20px 28px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #1e293b}
+.h-left h1{font-size:1.4rem;font-weight:700;color:#f8fafc}
+.h-left p{font-size:.8rem;color:#94a3b8;margin-top:2px}
+.h-right{display:flex;gap:10px;align-items:center}
+/* buttons */
+.btn{border:none;padding:9px 18px;border-radius:8px;font-size:.84rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:filter .15s}
+.btn:hover{filter:brightness(1.15)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-blue{background:#2563eb;color:#fff}
+.btn-green{background:#16a34a;color:#fff}
+/* status dot */
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.dot-green{background:#22c55e;box-shadow:0 0 6px #22c55e}
+.dot-grey{background:#475569}
+.dot-orange{background:#f97316;box-shadow:0 0 6px #f97316}
+/* layout */
+main{max-width:1200px;margin:0 auto;padding:24px 20px;display:grid;grid-template-columns:1fr 370px;gap:20px}
+@media(max-width:820px){main{grid-template-columns:1fr}}
+/* stats */
+.stats{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.stat{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:16px 20px}
+.stat-lbl{font-size:.72rem;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.stat-val{font-size:2rem;font-weight:800;color:#f1f5f9;line-height:1.1;margin-top:4px}
+.stat-sub{font-size:.73rem;color:#475569;margin-top:2px}
+/* card */
+.card{background:#1e293b;border:1px solid #334155;border-radius:12px;overflow:hidden;margin-bottom:18px}
+.card:last-child{margin-bottom:0}
+.card-hdr{padding:14px 18px;border-bottom:1px solid #334155;display:flex;align-items:center;justify-content:space-between}
+.card-title{font-size:.88rem;font-weight:700;color:#f1f5f9;display:flex;align-items:center;gap:8px}
+.badge{background:#334155;color:#94a3b8;font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:20px}
+.badge-blue{background:#1e3a5f;color:#60a5fa}
+/* section label */
+.sec-lbl{font-size:.7rem;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.07em;padding:7px 18px;background:#162032;border-bottom:1px solid #1e293b}
+/* email row */
+.e-row{padding:13px 18px;border-bottom:1px solid #1e293b;display:flex;gap:12px;align-items:flex-start;transition:background .15s;cursor:pointer}
+.e-row:last-child{border-bottom:none}
+.e-row:hover{background:#243447}
+.avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.82rem;font-weight:700;flex-shrink:0;color:#fff}
+.u-dot{width:7px;height:7px;border-radius:50%;background:#3b82f6;flex-shrink:0;margin-top:5px}
+.u-dot-empty{width:7px;flex-shrink:0}
+.e-body{flex:1;min-width:0}
+.e-from{font-size:.8rem;font-weight:600;color:#cbd5e1;display:flex;justify-content:space-between}
+.e-time{font-size:.73rem;color:#475569;font-weight:400}
+.e-subj{font-size:.87rem;color:#f1f5f9;font-weight:500;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.e-prev{font-size:.76rem;color:#64748b;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* event row */
+.ev-row{padding:13px 18px;border-bottom:1px solid #1e293b;display:flex;gap:12px;align-items:flex-start}
+.ev-row:last-child{border-bottom:none}
+.time-blk{background:#0f172a;border-radius:8px;padding:5px 9px;text-align:center;min-width:50px;flex-shrink:0}
+.time-h{font-size:.95rem;font-weight:700;color:#60a5fa;line-height:1}
+.time-m{font-size:.68rem;color:#475569}
+.ev-body{flex:1;min-width:0}
+.ev-title{font-size:.87rem;font-weight:600;color:#f1f5f9}
+.ev-meta{font-size:.75rem;color:#64748b;margin-top:3px}
+.ev-tag{display:inline-block;font-size:.68rem;font-weight:600;padding:1px 6px;border-radius:4px;margin-top:4px}
+.tag-today{background:#1e3a5f;color:#60a5fa}
+.tag-up{background:#1c2d1e;color:#4ade80}
+/* empty */
+.empty{padding:28px 18px;text-align:center;color:#475569;font-size:.84rem}
+/* spinner */
+.spin{display:inline-block;width:13px;height:13px;border:2px solid transparent;border-top-color:currentColor;border-radius:50%;animation:sp .7s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+/* toast */
+#toast{position:fixed;bottom:20px;right:20px;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:11px 16px;font-size:.82rem;color:#e2e8f0;transform:translateY(60px);opacity:0;transition:all .25s;z-index:99}
+#toast.show{transform:translateY(0);opacity:1}
+#toast.ok{border-color:#22c55e}
+#toast.err{border-color:#ef4444}
+</style>
 </head>
 <body>
-  <div class="card">
-    <h1>🌅 OAuth 2.1 Flow Test</h1>
-    <p>Test the OAuth 2.1 + PKCE flow for the Morning Brief Connector MCP server</p>
-    
-    <div class="step">
-      <div class="step-title">Step 1: Start Authorization</div>
-      <p>Click the button below to start the OAuth 2.1 authorization flow with PKCE.</p>
-      <button id="startAuth">Start Authorization</button>
-    </div>
 
-    <div class="step">
-      <div class="step-title">Step 2: After Authorization</div>
-      <p>After authorization, you'll be redirected back here with an authorization code.</p>
-      <button id="exchangeToken" disabled>Exchange Token</button>
-    </div>
+<header>
+  <div class="h-left">
+    <h1>🌅 Morning Brief</h1>
+    <p id="hSub">Loading…</p>
+  </div>
+  <div class="h-right">
+    <span id="hDot"><span class="dot dot-grey"></span></span>
+    <button id="syncBtn" class="btn btn-blue" disabled>
+      <span class="spin" id="spn" style="display:none"></span>
+      ↻ Sync &amp; Refresh
+    </button>
+  </div>
+</header>
 
-    <div class="step">
-      <div class="step-title">Step 3: Call MCP Endpoint</div>
-      <p>Use the access token to call the MCP endpoint.</p>
-      <button id="callMcp" disabled>Call get_morning_brief</button>
-    </div>
-
-    <div id="output" class="output" style="display: none;"></div>
+<main>
+  <div class="stats">
+    <div class="stat"><div class="stat-lbl">Unread</div><div class="stat-val" id="sUnread">—</div><div class="stat-sub">emails</div></div>
+    <div class="stat"><div class="stat-lbl">Today</div><div class="stat-val" id="sToday">—</div><div class="stat-sub">calendar events</div></div>
+    <div class="stat"><div class="stat-lbl">Upcoming</div><div class="stat-val" id="sUp">—</div><div class="stat-sub">next 7 days</div></div>
   </div>
 
-  <script>
-    const BASE_URL = '${baseUrl}';
-    const REDIRECT_URI = BASE_URL + '/test-oauth';
-    const CLIENT_ID = BASE_URL + '/test-oauth-client'; // CIMD client
+  <!-- emails column -->
+  <div>
+    <div class="card">
+      <div class="card-hdr">
+        <span class="card-title">📧 Important &amp; Unread <span class="badge badge-blue" id="cImp">0</span></span>
+      </div>
+      <div id="impList"><div class="empty">Loading…</div></div>
+    </div>
+    <div class="card">
+      <div class="card-hdr">
+        <span class="card-title">📰 Newsletters &amp; Marketing <span class="badge" id="cMkt">0</span></span>
+      </div>
+      <div id="mktList"><div class="empty">Loading…</div></div>
+    </div>
+  </div>
 
-    let state = {
-      codeVerifier: null,
-      codeChallenge: null,
-      authState: null,
-      authorizationCode: null,
-      accessToken: null,
-      refreshToken: null
-    };
+  <!-- calendar column -->
+  <div>
+    <div class="card">
+      <div class="card-hdr"><span class="card-title">📅 Calendar</span></div>
+      <div id="calList"><div class="empty">Loading…</div></div>
+    </div>
+  </div>
+</main>
 
-    const saved = localStorage.getItem('oauthState');
-    if (saved) {
-      state = JSON.parse(saved);
-    }
+<div id="toast"></div>
 
-    function saveState() {
-      localStorage.setItem('oauthState', JSON.stringify(state));
-    }
+<script>
+(function(){
+const BASE = '${baseUrl}';
+const TOKEN = '716180e24c87de8b699efd32198adbd9';
 
-    function log(message, isError = false) {
-      const output = document.getElementById('output');
-      output.style.display = 'block';
-      output.className = 'output ' + (isError ? 'error' : 'success');
-      output.textContent = message;
-    }
+// ── colours for avatars ──────────────────────────────────────────────────────
+const COLS=['#6366f1','#ec4899','#14b8a6','#f59e0b','#8b5cf6','#06b6d4','#10b981','#ef4444'];
+function aCol(s){let h=0;for(let i=0;i<s.length;i++)h=s.charCodeAt(i)+((h<<5)-h);return COLS[Math.abs(h)%COLS.length]}
+function aInit(n){if(!n)return'?';const p=n.split(' ').filter(Boolean);return p.length>=2?(p[0][0]+p[p.length-1][0]).toUpperCase():n.slice(0,2).toUpperCase()}
+function ago(iso){const d=Date.now()-new Date(iso).getTime(),m=Math.floor(d/60000),h=Math.floor(m/60),dy=Math.floor(h/24);return m<60?m+'m':h<24?h+'h':dy+'d'}
+function sast(iso){const d=new Date(new Date(iso).getTime()+2*3600000);return d.getUTCHours().toString().padStart(2,'0')+':'+d.getUTCMinutes().toString().padStart(2,'0')}
+function dFmt(iso){return new Date(iso).toLocaleDateString('en-ZA',{weekday:'short',month:'short',day:'numeric',timeZone:'Africa/Johannesburg'})}
+function isToday(iso){const a=new Date(iso),b=new Date();return a.getUTCFullYear()===b.getUTCFullYear()&&a.getUTCMonth()===b.getUTCMonth()&&a.getUTCDate()===b.getUTCDate()}
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 
-    function generateRandomString(length) {
-      const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
-      const values = crypto.getRandomValues(new Uint8Array(length));
-      return Array.from(values).map(x => possible[x % possible.length]).join('');
-    }
+function emailHtml(m){
+  const name=m.sender_name||m.sender_email||'?';
+  return \`<a href="\${esc(m.web_link||'#')}" target="_blank">
+  <div class="e-row">
+    \${m.is_read?'<div class="u-dot-empty"></div>':'<div class="u-dot"></div>'}
+    <div class="avatar" style="background:\${aCol(name)}">\${esc(aInit(name))}</div>
+    <div class="e-body">
+      <div class="e-from"><span>\${esc(name)}</span><span class="e-time">\${ago(m.received_at)}</span></div>
+      <div class="e-subj">\${esc(m.subject||'(no subject)')}</div>
+      <div class="e-prev">\${esc((m.body_preview||'').slice(0,110))}</div>
+    </div>
+  </div></a>\`}
 
-    async function generateCodeChallenge(codeVerifier) {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(codeVerifier);
-      const hash = await crypto.subtle.digest('SHA-256', data);
-      const base64 = btoa(String.fromCharCode(...new Uint8Array(hash)));
-      return base64.replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=/g, '');
-    }
+function eventHtml(e,today){
+  const t=sast(e.start_at);
+  const [h,mn]=t.split(':');
+  return \`<div class="ev-row">
+  <div class="time-blk"><div class="time-h">\${h}:\${mn}</div><div class="time-m">SAST</div></div>
+  <div class="ev-body">
+    <div class="ev-title">\${esc(e.subject||'(no title)')}</div>
+    <div class="ev-meta">\${e.location?'📍 '+esc(e.location)+' · ':''}\${today?'Today':esc(dFmt(e.start_at))}</div>
+    <span class="ev-tag \${today?'tag-today':'tag-up'}">\${today?'Today':'Upcoming'}</span>
+  </div></div>\`}
 
-    document.getElementById('startAuth').addEventListener('click', async () => {
-      try {
-        state.codeVerifier = generateRandomString(128);
-        state.codeChallenge = await generateCodeChallenge(state.codeVerifier);
-        state.authState = generateRandomString(32);
-        saveState();
+// ── API calls ────────────────────────────────────────────────────────────────
+async function apiBrief(){
+  const r=await fetch(BASE+'/brief',{headers:{Authorization:'Bearer '+TOKEN}});
+  if(!r.ok)throw new Error('brief '+r.status);
+  return r.json()}
 
-        const params = new URLSearchParams({
-          client_id: CLIENT_ID,
-          response_type: 'code',
-          redirect_uri: REDIRECT_URI,
-          scope: 'mcp:read offline_access',
-          state: state.authState,
-          code_challenge: state.codeChallenge,
-          code_challenge_method: 'S256'
-        });
+async function apiSync(){
+  const r=await fetch(BASE+'/sync',{method:'POST',headers:{Authorization:'Bearer '+TOKEN}});
+  return r.json()}
 
-        const authUrl = BASE_URL + '/authorize?' + params;
-        log('Starting authorization flow...\\nRedirecting to: ' + authUrl);
-        
-        setTimeout(() => {
-          window.location.href = authUrl;
-        }, 1000);
-        
-      } catch (error) {
-        log('Error: ' + error.message, true);
-      }
-    });
+// ── Render ───────────────────────────────────────────────────────────────────
+async function load(){
+  busy(true);
+  try{
+    const d=await apiBrief();
 
-    document.getElementById('exchangeToken').addEventListener('click', async () => {
-      try {
-        log('Exchanging authorization code for access token...');
+    document.getElementById('sUnread').textContent=d.emails.unread_count??0;
+    document.getElementById('sToday').textContent=d.calendar.today_events.length;
+    document.getElementById('sUp').textContent=d.calendar.upcoming_events.length;
 
-        const body = new URLSearchParams({
-          grant_type: 'authorization_code',
-          code: state.authorizationCode,
-          redirect_uri: REDIRECT_URI,
-          client_id: CLIENT_ID,
-          code_verifier: state.codeVerifier
-        });
+    const cls=d.status==='complete'?'dot-green':'dot-orange';
+    document.getElementById('hDot').innerHTML=\`<span class="dot \${cls}"></span>\`;
 
-        const response = await fetch(BASE_URL + '/oauth/token', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-          },
-          body: body.toString()
-        });
+    document.getElementById('hSub').textContent=new Date().toLocaleString('en-ZA',
+      {weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit',timeZone:'Africa/Johannesburg'});
 
-        const data = await response.json();
-        
-        if (response.ok) {
-          state.accessToken = data.access_token;
-          state.refreshToken = data.refresh_token;
-          saveState();
-          
-          document.getElementById('callMcp').disabled = false;
-          log('✅ Token received!\\n\\nAccess Token: ' + data.access_token.substring(0, 20) + '...\\nRefresh Token: ' + (data.refresh_token ? data.refresh_token.substring(0, 20) + '...' : 'none') + '\\nExpires in: ' + data.expires_in + 's\\nScopes: ' + data.scope);
-        } else {
-          log('❌ Token exchange failed:\\n' + JSON.stringify(data, null, 2), true);
-        }
-        
-      } catch (error) {
-        log('Error: ' + error.message, true);
-      }
-    });
+    const imp=d.emails.important_messages||[];
+    document.getElementById('cImp').textContent=imp.length;
+    document.getElementById('impList').innerHTML=imp.length?imp.map(emailHtml).join(''):'<div class="empty">No important emails</div>';
 
-    document.getElementById('callMcp').addEventListener('click', async () => {
-      try {
-        log('Calling MCP endpoint: get_morning_brief...');
+    const mkt=d.emails.marketing_messages||[];
+    document.getElementById('cMkt').textContent=mkt.length;
+    document.getElementById('mktList').innerHTML=mkt.length?mkt.map(emailHtml).join(''):'<div class="empty">No newsletters today</div>';
 
-        const response = await fetch(BASE_URL + '/mcp', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + state.accessToken
-          },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            method: 'tools/call',
-            params: {
-              name: 'get_morning_brief',
-              arguments: {}
-            },
-            id: 1
-          })
-        });
+    const te=d.calendar.today_events||[], ue=d.calendar.upcoming_events||[];
+    let cal='';
+    if(te.length) cal+='<div class="sec-lbl">Today</div>'+te.map(e=>eventHtml(e,true)).join('');
+    if(ue.length) cal+='<div class="sec-lbl">Coming up</div>'+ue.map(e=>eventHtml(e,false)).join('');
+    document.getElementById('calList').innerHTML=cal||'<div class="empty">No upcoming events</div>';
 
-        const data = await response.json();
-        
-        if (response.ok && !data.error) {
-          log('✅ MCP call successful!\\n\\n' + JSON.stringify(data, null, 2));
-        } else {
-          log('❌ MCP call failed:\\n' + JSON.stringify(data, null, 2), true);
-        }
-        
-      } catch (error) {
-        log('Error: ' + error.message, true);
-      }
-    });
+    toast('✓ Loaded',false);
+  }catch(e){toast('Error: '+e.message,true)}
+  finally{busy(false)}}
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const code = urlParams.get('code');
-    const returnedState = urlParams.get('state');
-    const error = urlParams.get('error');
-    const errorDescription = urlParams.get('error_description');
+document.getElementById('syncBtn').addEventListener('click',async()=>{
+  busy(true);toast('Syncing from Gmail…',false);
+  try{await apiSync();await load()}
+  catch(e){toast('Sync failed: '+e.message,true);busy(false)}});
 
-    if (error) {
-      log('❌ Authorization error: ' + error + '\\n' + (errorDescription || ''), true);
-    } else if (code && returnedState) {
-      if (returnedState !== state.authState) {
-        log('❌ State mismatch! Possible CSRF attack.', true);
-      } else {
-        state.authorizationCode = code;
-        saveState();
-        document.getElementById('exchangeToken').disabled = false;
-        log('✅ Authorization code received!\\n\\nCode: ' + code.substring(0, 20) + '...');
-        
-        window.history.replaceState({}, document.title, window.location.pathname);
-      }
-    }
+function busy(on){
+  document.getElementById('spn').style.display=on?'inline-block':'none';
+  document.getElementById('syncBtn').disabled=on}
 
-    if (state.accessToken) {
-      document.getElementById('callMcp').disabled = false;
-    }
-  </script>
+let toastTimer;
+function toast(msg,err){
+  const el=document.getElementById('toast');
+  el.textContent=msg;el.className='show '+(err?'err':'ok');
+  clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.className='',3000)}
+
+// boot
+load();
+})();
+</script>
 </body>
-</html>`;
+</html>`
 }
-
-/**
- * Create OAuth-protected MCP handler
- */
 export function createOAuthMcpHandler(baseUrl: string): any {
   return new OAuthProvider<OAuthEnvironment>({
     // OAuth endpoints

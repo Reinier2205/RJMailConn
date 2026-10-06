@@ -6,10 +6,8 @@
  */
 
 import { Environment } from "../index";
-import { EmailMessage } from "../microsoft/email";
-import { CalendarEvent } from "../microsoft/calendar";
-import { SyncSource, SyncStatus } from "../database/models";
 import { auditLog } from "../database/audit";
+import { SyncSource, SyncStatus } from "../database/models";
 
 /**
  * Data source status for morning brief
@@ -34,8 +32,8 @@ export interface EmailBriefData {
  * Calendar data categorization for brief
  */
 export interface CalendarBriefData {
-  today_events: CalendarEvent[];
-  upcoming_events: CalendarEvent[];
+  today_events: any[];
+  upcoming_events: any[];
 }
 
 /**
@@ -357,7 +355,7 @@ export class BriefHandler {
     } else if (emailStatus.status === "rate_limited") {
       warnings.push("Email sync rate limited - data refresh delayed");
     } else if (emailStatus.status === "source_unavailable") {
-      warnings.push("Microsoft Email service temporarily unavailable");
+      warnings.push("Email service temporarily unavailable");
     } else if (!emailStatus.last_sync) {
       warnings.push("No successful email sync found - email data not available");
     }
@@ -370,7 +368,7 @@ export class BriefHandler {
     } else if (calendarStatus.status === "rate_limited") {
       warnings.push("Calendar sync rate limited - data refresh delayed");
     } else if (calendarStatus.status === "source_unavailable") {
-      warnings.push("Microsoft Calendar service temporarily unavailable");
+      warnings.push("Calendar service temporarily unavailable");
     } else if (!calendarStatus.last_sync) {
       warnings.push("No successful calendar sync found - calendar data not available");
     }
@@ -400,7 +398,7 @@ export class BriefHandler {
   /**
    * Map database row to EmailMessage
    */
-  private mapRowToEmailMessage(row: any): EmailMessage {
+  private mapRowToEmailMessage(row: any): any {
     return {
       id: row.id,
       graph_message_id: row.graph_message_id,
@@ -424,7 +422,7 @@ export class BriefHandler {
   /**
    * Map database row to CalendarEvent
    */
-  private mapRowToCalendarEvent(row: any): CalendarEvent {
+  private mapRowToCalendarEvent(row: any): any {
     return {
       id: row.id,
       graph_event_id: row.graph_event_id,

@@ -6,12 +6,12 @@
  */
 
 import { Environment } from "../index";
-import { GraphClient } from "../microsoft/graph";
+import { GoogleCalendarClient, CreateEventInput } from "../google/calendar";
 import { auditLog } from "../database/audit";
-import { 
-  validateSubject, 
-  validateDateTime, 
-  validateEventTiming, 
+import {
+  validateSubject,
+  validateDateTime,
+  validateEventTiming,
   CalendarValidationError,
   isValidTimezone
 } from "../validation/calendar";
@@ -63,11 +63,11 @@ export interface CalendarEventResult {
  */
 export class CalendarEventHandler {
   private readonly env: Environment;
-  private readonly graphClient: GraphClient;
+  private readonly calendarClient: GoogleCalendarClient;
 
   constructor(env: Environment) {
     this.env = env;
-    this.graphClient = new GraphClient(env);
+    this.calendarClient = new GoogleCalendarClient(env);
   }
 
   /**
@@ -186,30 +186,29 @@ export class CalendarEventHandler {
    */
   private async createCalendarEvent(eventInput: CreateCalendarEventInput): Promise<CalendarEventResult> {
     try {
-      // Transform to Microsoft Graph event format
-      const graphEvent = this.transformToGraphEvent(eventInput);
+      const input: CreateEventInput = {
+        subject: eventInput.subject,
+        startTime: eventInput.startTime,
+        endTime: eventInput.endTime,
+        timezone: eventInput.timezone,
+        location: eventInput.location,
+        body: eventInput.body,
+        attendees: eventInput.attendees,
+      };
 
-      // Create event via Microsoft Graph
-      const createResult = await this.graphClient.createCalendarEvent(graphEvent);
-      
-      if (createResult.success) {
+      const result = await this.calendarClient.createEvent(input);
+
+      if (result.success) {
         return {
           success: true,
-          eventId: createResult.id,
-          webLink: `https://outlook.office.com/calendar/`
-        };
-      } else {
-        return {
-          success: false,
-          error: createResult.error?.message || "Calendar event creation failed"
+          eventId: result.eventId,
+          webLink: `https://calendar.google.com/`,
         };
       }
-      
+      return { success: false, error: result.error ?? "Calendar event creation failed" };
+
     } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error"
-      };
+      return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
     }
   }
 
@@ -218,164 +217,27 @@ export class CalendarEventHandler {
    */
   private async updateCalendarEvent(eventId: string, updateInput: UpdateCalendarEventInput): Promise<CalendarEventResult> {
     try {
-      // First, verify the event exists (requirement 10.2)
-      const existingEvent = await this.getExistingEvent(eventId);
-      if (!existingEvent) {
-        return {
-          success: false,
-          error: "Calendar event not found"
-        };
-      }
+      const result = await this.calendarClient.updateEvent(eventId, {
+        subject: updateInput.subject,
+        startTime: updateInput.startTime,
+        endTime: updateInput.endTime,
+        timezone: updateInput.timezone,
+        location: updateInput.location,
+        body: updateInput.body,
+        attendees: updateInput.attendees,
+      });
 
-      // Transform update input to Microsoft Graph format
-      const graphUpdate = this.transformUpdateToGraphEvent(updateInput);
-
-      // Update event via Microsoft Graph
-      const updateResult = await this.graphClient.updateCalendarEvent(eventId, graphUpdate);
-      
-      if (updateResult.success) {
-        return {
-          success: true,
-          webLink: `https://outlook.office.com/calendar/`
-        };
-      } else {
-        return {
-          success: false,
-          error: updateResult.error?.message || "Calendar event update failed"
-        };
-      }
-      
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error"
-      };
-    }
-  }
-
-  /**
-   * Get existing calendar event to verify ID (requirement 10.2)
-   */
-  private async getExistingEvent(eventId: string): Promise<any> {
-    try {
-      const result = await this.graphClient.getCalendarEvent(eventId);
       if (result.success) {
-        return result.event;
-      } else {
-        console.error("Failed to get existing event:", result.error);
-        return null;
+        return { success: true, webLink: `https://calendar.google.com/` };
       }
+      return { success: false, error: result.error ?? "Calendar event update failed" };
+
     } catch (error) {
-      console.error("Failed to get existing event:", error);
-      return null;
+      return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
     }
   }
 
-  /**
-   * Transform input to Microsoft Graph event format
-   */
-  private transformToGraphEvent(eventInput: CreateCalendarEventInput): any {
-    const graphEvent: any = {
-      subject: eventInput.subject,
-      body: {
-        contentType: "HTML",
-        content: eventInput.body || ""
-      },
-      start: {
-        dateTime: eventInput.startTime,
-        timeZone: eventInput.timezone
-      },
-      end: {
-        dateTime: eventInput.endTime,
-        timeZone: eventInput.timezone
-      },
-      isAllDay: Boolean(eventInput.isAllDay),
-      showAs: eventInput.showAs || "busy",
-      sensitivity: eventInput.sensitivity || "normal"
-    };
-
-    // Add location if provided
-    if (eventInput.location) {
-      graphEvent.location = {
-        displayName: eventInput.location
-      };
-    }
-
-    // Add attendees if provided
-    if (eventInput.attendees && eventInput.attendees.length > 0) {
-      graphEvent.attendees = eventInput.attendees.map(email => ({
-        emailAddress: {
-          address: email.trim(),
-          name: email.trim()
-        },
-        type: "required"
-      }));
-    }
-
-    return graphEvent;
-  }
-
-  /**
-   * Transform update input to Microsoft Graph event format
-   */
-  private transformUpdateToGraphEvent(updateInput: UpdateCalendarEventInput): any {
-    const graphUpdate: any = {};
-
-    if (updateInput.subject !== undefined) {
-      graphUpdate.subject = updateInput.subject;
-    }
-
-    if (updateInput.body !== undefined) {
-      graphUpdate.body = {
-        contentType: "HTML",
-        content: updateInput.body
-      };
-    }
-
-    if (updateInput.startTime !== undefined && updateInput.timezone !== undefined) {
-      graphUpdate.start = {
-        dateTime: updateInput.startTime,
-        timeZone: updateInput.timezone
-      };
-    }
-
-    if (updateInput.endTime !== undefined && updateInput.timezone !== undefined) {
-      graphUpdate.end = {
-        dateTime: updateInput.endTime,
-        timeZone: updateInput.timezone
-      };
-    }
-
-    if (updateInput.location !== undefined) {
-      graphUpdate.location = {
-        displayName: updateInput.location
-      };
-    }
-
-    if (updateInput.isAllDay !== undefined) {
-      graphUpdate.isAllDay = updateInput.isAllDay;
-    }
-
-    if (updateInput.showAs !== undefined) {
-      graphUpdate.showAs = updateInput.showAs;
-    }
-
-    if (updateInput.sensitivity !== undefined) {
-      graphUpdate.sensitivity = updateInput.sensitivity;
-    }
-
-    if (updateInput.attendees !== undefined) {
-      graphUpdate.attendees = updateInput.attendees.map(email => ({
-        emailAddress: {
-          address: email.trim(),
-          name: email.trim()
-        },
-        type: "required"
-      }));
-    }
-
-    return graphUpdate;
-  }
+  // Google Calendar client handles API format internally - no transform methods needed.
 
   /**
    * Parse and validate calendar event creation input

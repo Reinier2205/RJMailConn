@@ -1,17 +1,14 @@
 ﻿/**
  * Draft Email Endpoints - Email Draft Creation (NO SENDING)
- * 
- * Provides secure endpoints for creating email drafts without sending capability.
- * Enforces the critical constraint that this system NEVER sends emails.
+ *
+ * Creates Gmail drafts using the Gmail API. This system NEVER sends email.
  */
 
 import { Environment } from "../index";
-import { GraphClient } from "../microsoft/graph";
+import { TokenStorage } from "../auth/tokens";
+import { GoogleOAuthHandler } from "../google/auth";
 import { auditLog } from "../database/audit";
 
-/**
- * Email draft input validation interface
- */
 export interface DraftMessageInput {
   subject: string;
   body: string;
@@ -21,18 +18,12 @@ export interface DraftMessageInput {
   importance?: "low" | "normal" | "high";
 }
 
-/**
- * Reply draft input validation interface
- */
 export interface ReplyDraftInput {
   messageId: string;
   body: string;
   replyAll?: boolean;
 }
 
-/**
- * Draft creation result
- */
 export interface DraftResult {
   success: boolean;
   draftId?: string;
@@ -40,387 +31,221 @@ export interface DraftResult {
   error?: string;
 }
 
-/**
- * Draft validation error
- */
 export class DraftValidationError extends Error {
-  constructor(
-    message: string,
-    public field?: string,
-    public value?: any
-  ) {
+  constructor(message: string, public field?: string, public value?: any) {
     super(message);
     this.name = "DraftValidationError";
   }
 }
 
-/**
- * Draft Email Handler
- */
 export class DraftHandler {
   private readonly env: Environment;
-  private readonly graphClient: GraphClient;
+  private readonly tokenStorage: TokenStorage;
+  private readonly oauthHandler: GoogleOAuthHandler;
 
   constructor(env: Environment) {
     this.env = env;
-    this.graphClient = new GraphClient(env);
+    this.tokenStorage = new TokenStorage(env);
+    this.oauthHandler = new GoogleOAuthHandler(env);
   }
 
-  /**
-   * Handle POST /drafts - Create new email draft
-   */
+  // ─── Public handlers ────────────────────────────────────────────────────────
+
   async handleCreateDraft(request: Request): Promise<Response> {
     try {
       const draftInput = await this.parseAndValidateDraft(request);
       const result = await this.createDraft(draftInput);
-      
-      // Log draft creation to audit trail
+
       await auditLog(this.env.DB, {
         operation: "create",
         resourceType: "draft",
         resourceId: result.draftId || null,
         result: result.success ? "success" : "failure",
         requestedBy: "api",
-        details: {
-          action: "create_draft",
-          subject: draftInput.subject,
-          recipientCount: draftInput.toRecipients.length,
-          error: result.error
-        }
+        details: { action: "create_draft", subject: draftInput.subject, recipientCount: draftInput.toRecipients.length, error: result.error },
       });
-      
-      if (result.success) {
-        return new Response(
-          JSON.stringify({
-            success: true,
-            draftId: result.draftId,
-            webLink: result.webLink,
-            message: "Draft created successfully - appears in Outlook Drafts folder"
-          }),
-          { 
-            status: 201,
-            headers: { "Content-Type": "application/json" }
-          }
-        );
-      } else {
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: result.error
-          }),
-          { 
-            status: 400,
-            headers: { "Content-Type": "application/json" }
-          }
-        );
-      }
-      
+
+      return result.success
+        ? new Response(JSON.stringify({ success: true, draftId: result.draftId, webLink: result.webLink, message: "Draft saved to Gmail Drafts folder" }), { status: 201, headers: { "Content-Type": "application/json" } })
+        : new Response(JSON.stringify({ success: false, error: result.error }), { status: 400, headers: { "Content-Type": "application/json" } });
+
     } catch (error) {
       return this.handleError(error, "Draft creation failed");
     }
   }
 
-  /**
-   * Handle POST /drafts/reply - Create reply draft
-   */
   async handleCreateReplyDraft(request: Request): Promise<Response> {
     try {
       const replyInput = await this.parseAndValidateReply(request);
       const result = await this.createReplyDraft(replyInput);
-      
-      // Log reply draft creation to audit trail
+
       await auditLog(this.env.DB, {
         operation: "create",
         resourceType: "draft",
         resourceId: result.draftId || null,
         result: result.success ? "success" : "failure",
         requestedBy: "api",
-        details: {
-          action: "create_reply_draft",
-          originalMessageId: replyInput.messageId,
-          replyAll: replyInput.replyAll,
-          error: result.error
-        }
+        details: { action: "create_reply_draft", originalMessageId: replyInput.messageId, replyAll: replyInput.replyAll, error: result.error },
       });
-      
-      if (result.success) {
-        return new Response(
-          JSON.stringify({
-            success: true,
-            draftId: result.draftId,
-            webLink: result.webLink,
-            message: "Reply draft created successfully"
-          }),
-          { 
-            status: 201,
-            headers: { "Content-Type": "application/json" }
-          }
-        );
-      } else {
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: result.error
-          }),
-          { 
-            status: 400,
-            headers: { "Content-Type": "application/json" }
-          }
-        );
-      }
-      
+
+      return result.success
+        ? new Response(JSON.stringify({ success: true, draftId: result.draftId, webLink: result.webLink, message: "Reply draft saved to Gmail Drafts folder" }), { status: 201, headers: { "Content-Type": "application/json" } })
+        : new Response(JSON.stringify({ success: false, error: result.error }), { status: 400, headers: { "Content-Type": "application/json" } });
+
     } catch (error) {
       return this.handleError(error, "Reply draft creation failed");
     }
   }
 
-  /**
-   * Create email draft (NO SENDING CAPABILITY)
-   */
-  private async createDraft(draftInput: DraftMessageInput): Promise<DraftResult> {
-    try {
-      // Transform to Microsoft Graph draft format
-      const graphDraft = {
-        subject: draftInput.subject,
-        importance: draftInput.importance || "normal",
-        body: {
-          contentType: "HTML",
-          content: draftInput.body
-        },
-        toRecipients: draftInput.toRecipients.map(email => ({
-          emailAddress: {
-            address: email.trim(),
-            name: email.trim()
-          }
-        })),
-        ccRecipients: (draftInput.ccRecipients || []).map(email => ({
-          emailAddress: {
-            address: email.trim(),
-            name: email.trim()
-          }
-        })),
-        bccRecipients: (draftInput.bccRecipients || []).map(email => ({
-          emailAddress: {
-            address: email.trim(),
-            name: email.trim()
-          }
-        }))
-      };
+  // ─── Gmail API calls ────────────────────────────────────────────────────────
 
-      // Create draft via Microsoft Graph (creates in Drafts folder, does NOT send)
-      const createResult = await this.graphClient.createDraft(graphDraft);
-      
-      if (createResult.success) {
-        return {
-          success: true,
-          draftId: createResult.id,
-          webLink: `https://outlook.office.com/mail/drafts`
-        };
-      } else {
-        return {
-          success: false,
-          error: createResult.error?.message || "Draft creation failed"
-        };
+  private async createDraft(input: DraftMessageInput): Promise<DraftResult> {
+    try {
+      const accessToken = await this.getValidAccessToken();
+      if (!accessToken) return { success: false, error: "No valid access token - re-authentication required" };
+
+      const to = input.toRecipients.join(", ");
+      const cc = input.ccRecipients?.join(", ") ?? "";
+      const lines = [
+        `To: ${to}`,
+        cc ? `Cc: ${cc}` : null,
+        `Subject: ${input.subject}`,
+        `Content-Type: text/html; charset=UTF-8`,
+        "",
+        input.body,
+      ].filter(Boolean).join("\r\n");
+
+      const encoded = this.encodeRfc2822(lines);
+
+      const resp = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/drafts", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ message: { raw: encoded } }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.text();
+        return { success: false, error: `Gmail draft creation failed: ${resp.status} ${err}` };
       }
-      
+
+      const data = await resp.json() as any;
+      return { success: true, draftId: data.id, webLink: "https://mail.google.com/mail/#drafts" };
+
     } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error"
-      };
+      return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
     }
   }
 
-  /**
-   * Create reply draft (NO SENDING CAPABILITY)
-   */
-  private async createReplyDraft(replyInput: ReplyDraftInput): Promise<DraftResult> {
+  private async createReplyDraft(input: ReplyDraftInput): Promise<DraftResult> {
     try {
-      // Get original message details for reply context
-      const originalMessage = await this.getOriginalMessage(replyInput.messageId);
-      if (!originalMessage) {
-        return {
-          success: false,
-          error: "Original message not found"
-        };
+      const accessToken = await this.getValidAccessToken();
+      if (!accessToken) return { success: false, error: "No valid access token - re-authentication required" };
+
+      // Fetch original message headers for threading
+      const msgResp = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${input.messageId}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Message-ID&metadataHeaders=References`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      if (!msgResp.ok) return { success: false, error: "Original message not found" };
+
+      const msgData = await msgResp.json() as any;
+      const h: Record<string, string> = {};
+      for (const hdr of msgData.payload?.headers ?? []) h[hdr.name.toLowerCase()] = hdr.value;
+
+      const replyTo = h["from"] ?? "";
+      const subject = h["subject"]?.startsWith("Re:") ? h["subject"] : `Re: ${h["subject"] ?? ""}`;
+      const msgId = h["message-id"] ?? "";
+      const refs = h["references"] ? `${h["references"]} ${msgId}` : msgId;
+
+      const lines = [
+        `To: ${replyTo}`,
+        `Subject: ${subject}`,
+        `In-Reply-To: ${msgId}`,
+        `References: ${refs}`,
+        `Content-Type: text/html; charset=UTF-8`,
+        "",
+        input.body,
+      ].join("\r\n");
+
+      const encoded = this.encodeRfc2822(lines);
+
+      const resp = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/drafts", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ message: { raw: encoded, threadId: msgData.threadId } }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.text();
+        return { success: false, error: `Gmail reply draft failed: ${resp.status} ${err}` };
       }
 
-      // Create reply draft via Microsoft Graph (endpoint determined by replyAll flag)
+      const data = await resp.json() as any;
+      return { success: true, draftId: data.id, webLink: "https://mail.google.com/mail/#drafts" };
 
-      const replyDraft = {
-        body: {
-          contentType: "HTML", 
-          content: replyInput.body
-        }
-      };
-
-      // This creates a reply draft, does NOT send
-      const createResult = await this.graphClient.createDraft(replyDraft);
-      
-      if (createResult.success) {
-        return {
-          success: true,
-          draftId: createResult.id,
-          webLink: `https://outlook.office.com/mail/drafts`
-        };
-      } else {
-        return {
-          success: false,
-          error: createResult.error?.message || "Reply draft creation failed"
-        };
-      }
-      
     } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error"
-      };
+      return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
     }
   }
 
-  /**
-   * Get original message for reply context
-   */
-  private async getOriginalMessage(_messageId: string): Promise<any> {
-    try {
-      return await this.graphClient.getUserProfile(); // Placeholder - should get specific message
-    } catch (error) {
-      console.error("Failed to get original message:", error);
-      return null;
-    }
-  }
+  // ─── Validation ─────────────────────────────────────────────────────────────
 
-  /**
-   * Parse and validate draft input from request
-   */
   private async parseAndValidateDraft(request: Request): Promise<DraftMessageInput> {
     let body: any;
-    
-    try {
-      body = await request.json();
-    } catch (error) {
-      throw new DraftValidationError("Invalid JSON in request body", "body", body);
-    }
+    try { body = await request.json(); } catch { throw new DraftValidationError("Invalid JSON in request body"); }
 
-    // Validate required fields
-    if (!body.subject || typeof body.subject !== "string") {
-      throw new DraftValidationError("Subject is required and must be a string", "subject", body.subject);
-    }
-
-    if (!body.body || typeof body.body !== "string") {
-      throw new DraftValidationError("Body is required and must be a string", "body", body.body);
-    }
-
-    if (!body.toRecipients || !Array.isArray(body.toRecipients) || body.toRecipients.length === 0) {
-      throw new DraftValidationError("At least one recipient is required", "toRecipients", body.toRecipients);
-    }
-
-    // Validate email addresses
-    const validateEmailList = (emails: any[], fieldName: string): string[] => {
-      if (!Array.isArray(emails)) {
-        throw new DraftValidationError(`${fieldName} must be an array`, fieldName, emails);
-      }
-      
-      return emails.map((email, index) => {
-        if (typeof email !== "string") {
-          throw new DraftValidationError(`${fieldName}[${index}] must be a string`, fieldName, email);
-        }
-        
-        const trimmed = email.trim().toLowerCase();
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        
-        if (!emailRegex.test(trimmed)) {
-          throw new DraftValidationError(`Invalid email format: ${email}`, fieldName, email);
-        }
-        
-        return trimmed;
-      });
-    };
-
-    const toRecipients = validateEmailList(body.toRecipients, "toRecipients");
-    const ccRecipients = body.ccRecipients ? validateEmailList(body.ccRecipients, "ccRecipients") : [];
-    const bccRecipients = body.bccRecipients ? validateEmailList(body.bccRecipients, "bccRecipients") : [];
-
-    // Validate importance
-    const importance = body.importance || "normal";
-    if (!["low", "normal", "high"].includes(importance)) {
-      throw new DraftValidationError("Importance must be low, normal, or high", "importance", importance);
-    }
+    if (!body.subject || typeof body.subject !== "string") throw new DraftValidationError("Subject is required", "subject");
+    if (!body.body || typeof body.body !== "string") throw new DraftValidationError("Body is required", "body");
+    if (!Array.isArray(body.toRecipients) || body.toRecipients.length === 0) throw new DraftValidationError("At least one recipient required", "toRecipients");
 
     return {
       subject: body.subject.trim(),
       body: body.body.trim(),
-      toRecipients,
-      ccRecipients: ccRecipients.length > 0 ? ccRecipients : undefined,
-      bccRecipients: bccRecipients.length > 0 ? bccRecipients : undefined,
-      importance: importance as "low" | "normal" | "high"
+      toRecipients: this.validateEmailList(body.toRecipients, "toRecipients"),
+      ccRecipients: body.ccRecipients ? this.validateEmailList(body.ccRecipients, "ccRecipients") : undefined,
+      bccRecipients: body.bccRecipients ? this.validateEmailList(body.bccRecipients, "bccRecipients") : undefined,
+      importance: ["low", "normal", "high"].includes(body.importance) ? body.importance : "normal",
     };
   }
 
-  /**
-   * Parse and validate reply input from request
-   */
   private async parseAndValidateReply(request: Request): Promise<ReplyDraftInput> {
     let body: any;
-    
-    try {
-      body = await request.json();
-    } catch (error) {
-      throw new DraftValidationError("Invalid JSON in request body", "body", body);
-    }
+    try { body = await request.json(); } catch { throw new DraftValidationError("Invalid JSON in request body"); }
 
-    // Validate required fields
-    if (!body.messageId || typeof body.messageId !== "string") {
-      throw new DraftValidationError("Message ID is required and must be a string", "messageId", body.messageId);
-    }
+    if (!body.messageId || typeof body.messageId !== "string") throw new DraftValidationError("messageId is required", "messageId");
+    if (!body.body || typeof body.body !== "string") throw new DraftValidationError("body is required", "body");
 
-    if (!body.body || typeof body.body !== "string") {
-      throw new DraftValidationError("Reply body is required and must be a string", "body", body.body);
-    }
-
-    return {
-      messageId: body.messageId.trim(),
-      body: body.body.trim(),
-      replyAll: Boolean(body.replyAll)
-    };
+    return { messageId: body.messageId.trim(), body: body.body.trim(), replyAll: Boolean(body.replyAll) };
   }
 
-  /**
-   * Handle errors consistently
-   */
+  private validateEmailList(emails: any[], field: string): string[] {
+    return emails.map((email, i) => {
+      if (typeof email !== "string") throw new DraftValidationError(`${field}[${i}] must be a string`, field);
+      const trimmed = email.trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) throw new DraftValidationError(`Invalid email: ${email}`, field);
+      return trimmed;
+    });
+  }
+
+  // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+  private async getValidAccessToken(): Promise<string | null> {
+    const valid = await this.oauthHandler.validateTokens();
+    if (!valid) return null;
+    return this.tokenStorage.getAccessToken();
+  }
+
+  private encodeRfc2822(raw: string): string {
+    return btoa(unescape(encodeURIComponent(raw)))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
   private handleError(error: unknown, context: string): Response {
-    console.error(`${context}:`, error);
-    
-    const message = error instanceof DraftValidationError 
-      ? error.message
-      : (error instanceof Error ? error.message : "Unknown error");
-    
+    const message = error instanceof DraftValidationError ? error.message : (error instanceof Error ? error.message : "Unknown error");
     const status = error instanceof DraftValidationError ? 400 : 500;
-    
     return new Response(
-      JSON.stringify({ 
-        success: false,
-        error: context,
-        message: message,
-        field: error instanceof DraftValidationError ? error.field : undefined
-      }),
-      { 
-        status,
-        headers: { "Content-Type": "application/json" }
-      }
+      JSON.stringify({ success: false, error: context, message, field: error instanceof DraftValidationError ? error.field : undefined }),
+      { status, headers: { "Content-Type": "application/json" } }
     );
   }
 }
-
-/**
- * IMPORTANT SECURITY NOTE:
- * 
- * This module creates DRAFTS ONLY - it has NO email sending capability.
- * The system is designed to NEVER send emails automatically.
- * 
- * - All drafts are created in the user's Outlook Drafts folder
- * - No /send endpoints are implemented
- * - No Mail.Send permission is requested 
- * - Manual sending must be done through Outlook interface
- */
-

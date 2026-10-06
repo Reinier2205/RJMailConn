@@ -7,6 +7,7 @@
 
 import { Environment } from "../index";
 import { OAuthHandler } from "../auth/oauth";
+import { GoogleOAuthHandler } from "../google/auth";
 import { auditLog } from "../database/audit";
 import { DraftHandler } from "./drafts";
 import { CalendarEventHandler } from "./calendar";
@@ -72,6 +73,8 @@ export class APIRouter {
         return await this.handleBriefEndpoint(request, corsHeaders);
       } else if (path === "/sync") {
         return await this.handleSyncEndpoint(request, corsHeaders);
+      } else if (path === "/openapi.json") {
+        return await this.handleOpenApiEndpoint(corsHeaders);
       } else if (path.startsWith("/health") || path.startsWith("/status") || path === "/version") {
         return await this.handleHealthEndpoints(request, corsHeaders);
       } else {
@@ -215,7 +218,7 @@ export class APIRouter {
         requestedBy: "system",
         details: { 
           action: "oauth_callback",
-          userPrincipalName: authResult.user?.userPrincipalName,
+          userPrincipalName: authResult.user?.email,
           error: authResult.error
         }
       });
@@ -226,8 +229,9 @@ export class APIRouter {
             success: true,
             user: {
               displayName: authResult.user?.displayName,
-              userPrincipalName: authResult.user?.userPrincipalName,
-              mail: authResult.user?.mail
+              email: authResult.user?.email,
+              userPrincipalName: authResult.user?.email,
+              mail: authResult.user?.email
             }
           }),
           { 
@@ -433,65 +437,130 @@ export class APIRouter {
       }
 
       try {
-        const { TokenStorage } = await import("../auth/tokens");
-        const tokenStorage = new TokenStorage(this.env);
-        
-        // Get current tokens
-        const tokens = await tokenStorage.getTokens();
-        if (!tokens?.refreshToken) {
+        const googleOAuth = new GoogleOAuthHandler(this.env);
+        const result = await googleOAuth.refreshTokens();
+
+        if (!result.success || !result.tokens) {
           return new Response(
-            JSON.stringify({ error: "No refresh token available" }),
+            JSON.stringify({ error: "Token refresh failed", details: result.error }),
             { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
         }
-
-        // Refresh the token
-        const tokenUrl = `https://login.microsoftonline.com/${this.env.TENANT_ID}/oauth2/v2.0/token`;
-        
-        const requestBody = new URLSearchParams({
-          client_id: this.env.CLIENT_ID,
-          client_secret: this.env.CLIENT_SECRET,
-          grant_type: "refresh_token",
-          refresh_token: tokens.refreshToken,
-          scope: tokens.scope
-        });
-
-        const response = await fetch(tokenUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded"
-          },
-          body: requestBody
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          return new Response(
-            JSON.stringify({ error: "Token refresh failed", details: errorText }),
-            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
-        }
-
-        const tokenData = await response.json() as any;
-        
-        // Update stored tokens
-        await tokenStorage.updateAccessToken(
-          tokenData.access_token,
-          new Date(Date.now() + (tokenData.expires_in * 1000))
-        );
 
         return new Response(
-          JSON.stringify({ 
-            success: true, 
-            expiresIn: tokenData.expires_in,
-            expiresAt: new Date(Date.now() + (tokenData.expires_in * 1000)).toISOString()
+          JSON.stringify({
+            success: true,
+            expiresIn: Math.floor((result.tokens.expiresAt.getTime() - Date.now()) / 1000),
+            expiresAt: result.tokens.expiresAt.toISOString(),
           }),
           { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
-        
+
       } catch (error) {
         return this.handleError(error, corsHeaders, "Token refresh failed");
       }
+    });
+  }
+
+  async handleOpenApiEndpoint(corsHeaders: Record<string, string>): Promise<Response> {
+    // Serve the OpenAPI schema publicly - contains NO secrets or tokens
+    const OPENAPI_URL = "https://raw.githubusercontent.com/reinier-olivier/RJMailConn/main/morning-brief-openapi.json";
+    
+    // We embed it directly so there's no external dependency
+    const schema = {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "Morning Brief",
+        "description": "Reads Reinier's Gmail and Google Calendar. Use getMorningBrief to get emails and calendar events. Use syncNow before getMorningBrief if you want the very latest data.",
+        "version": "2.0.0"
+      },
+      "servers": [{ "url": "https://morning-brief-connector.reinier-olivier.workers.dev" }],
+      "paths": {
+        "/brief": {
+          "get": {
+            "operationId": "getMorningBrief",
+            "summary": "Get emails and calendar",
+            "description": "Returns categorised emails and calendar events. Call syncNow first for the very latest data.",
+            "security": [{ "BearerAuth": [] }],
+            "responses": { "200": { "description": "Morning brief data" } }
+          }
+        },
+        "/sync": {
+          "post": {
+            "operationId": "syncNow",
+            "summary": "Sync latest data from Gmail",
+            "description": "Pulls latest emails and calendar events from Gmail. Call before getMorningBrief for up-to-the-minute data.",
+            "security": [{ "BearerAuth": [] }],
+            "responses": { "200": { "description": "Sync result" } }
+          }
+        },
+        "/calendar/events": {
+          "post": {
+            "operationId": "createCalendarEvent",
+            "summary": "Create a Google Calendar event",
+            "description": "Creates a new event. Always confirm details with user before calling.",
+            "security": [{ "BearerAuth": [] }],
+            "requestBody": {
+              "required": true,
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "required": ["subject", "startTime", "endTime", "timezone"],
+                    "properties": {
+                      "subject":   { "type": "string" },
+                      "startTime": { "type": "string", "description": "ISO 8601 e.g. 2026-10-10T09:00:00" },
+                      "endTime":   { "type": "string" },
+                      "timezone":  { "type": "string", "description": "IANA e.g. Africa/Johannesburg" },
+                      "location":  { "type": "string" },
+                      "body":      { "type": "string" },
+                      "attendees": { "type": "array", "items": { "type": "string" } }
+                    }
+                  }
+                }
+              }
+            },
+            "responses": { "201": { "description": "Event created" } }
+          }
+        },
+        "/drafts": {
+          "post": {
+            "operationId": "createEmailDraft",
+            "summary": "Save a Gmail draft (does NOT send)",
+            "description": "Creates a draft in Gmail Drafts. NEVER sends. User must open Gmail to send manually.",
+            "security": [{ "BearerAuth": [] }],
+            "requestBody": {
+              "required": true,
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "required": ["subject", "body", "toRecipients"],
+                    "properties": {
+                      "subject":      { "type": "string" },
+                      "body":         { "type": "string" },
+                      "toRecipients": { "type": "array", "items": { "type": "string" } },
+                      "ccRecipients": { "type": "array", "items": { "type": "string" } },
+                      "importance":   { "type": "string", "enum": ["low","normal","high"] }
+                    }
+                  }
+                }
+              }
+            },
+            "responses": { "201": { "description": "Draft saved" } }
+          }
+        }
+      },
+      "components": {
+        "securitySchemes": {
+          "BearerAuth": { "type": "http", "scheme": "bearer" }
+        }
+      }
+    };
+
+    return new Response(JSON.stringify(schema, null, 2), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   }
 

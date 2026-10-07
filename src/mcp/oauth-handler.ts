@@ -1,4 +1,4 @@
-﻿/**
+/**
  * MCP OAuth Handler - OAuth 2.1 Protected MCP Endpoint
  * 
  * Provides OAuth 2.1 authentication for the MCP endpoint using
@@ -8,6 +8,7 @@
 import { OAuthProvider } from '@cloudflare/workers-oauth-provider';
 import { Environment } from '../index';
 import { BriefHandler } from '../api/brief';
+import { buildGetMyMailPage } from './export-json-page';
 
 /**
  * Extended Environment with OAuth KV binding and OAuth API
@@ -265,6 +266,14 @@ async function defaultHandler(
     });
   }
 
+  // GetMyMail - unified daily sync page (also handles /export-json for backwards compat)
+  if (url.pathname === '/getmymail' || url.pathname === '/export-json') {
+    return new Response(buildGetMyMailPage(url.origin), {
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+  }
+
   // Root page - information about the service
   if (url.pathname === '/') {
     return new Response(
@@ -281,7 +290,7 @@ async function defaultHandler(
   </style>
 </head>
 <body>
-  <h1>🌅 Morning Brief Connector</h1>
+  <h1>Ã°Å¸Å’â€¦ Morning Brief Connector</h1>
   <p>OAuth 2.1 Protected MCP Server for Reinier's Morning Intelligence Brief</p>
   
   <div class="info">
@@ -425,7 +434,7 @@ function buildConsentPage(details: any, handle: string): string {
     .join('<br>');
 
   const loopbackWarning = details.redirectIsLoopback
-    ? '<p class="warning"><strong>⚠️ This sends access to an app on your computer.</strong> Continue only if you just started signing in from it.</p>'
+    ? '<p class="warning"><strong>Ã¢Å¡Â Ã¯Â¸Â This sends access to an app on your computer.</strong> Continue only if you just started signing in from it.</p>'
     : '';
 
   return `<!DOCTYPE html>
@@ -494,7 +503,7 @@ function buildConsentPage(details: any, handle: string): string {
 </head>
 <body>
   <div class="card">
-    <h1>🌅 Allow ${name} to access your Morning Brief?</h1>
+    <h1>Ã°Å¸Å’â€¦ Allow ${name} to access your Morning Brief?</h1>
     
     <div class="app-info">
       <p>${origin}</p>
@@ -512,7 +521,7 @@ function buildConsentPage(details: any, handle: string): string {
       </div>
 
       <div class="auto-note">
-        ✅ <strong>Single-user system</strong> - Reinier's private Morning Brief connector
+        Ã¢Å“â€¦ <strong>Single-user system</strong> - Reinier's private Morning Brief connector
       </div>
 
       <div class="buttons">
@@ -559,7 +568,7 @@ function buildErrorPage(message: string): string {
 </head>
 <body>
   <div class="card">
-    <h1>❌ Authorization Error</h1>
+    <h1>Ã¢ÂÅ’ Authorization Error</h1>
     <div class="error">
       <p>${message}</p>
     </div>
@@ -669,46 +678,46 @@ main{max-width:1200px;margin:0 auto;padding:24px 20px;display:grid;grid-template
 
 <header>
   <div class="h-left">
-    <h1>🌅 Morning Brief</h1>
-    <p id="hSub">Loading…</p>
+    <h1>Ã°Å¸Å’â€¦ Morning Brief</h1>
+    <p id="hSub">LoadingÃ¢â‚¬Â¦</p>
   </div>
   <div class="h-right">
     <span id="hDot"><span class="dot dot-grey"></span></span>
     <button id="syncBtn" class="btn btn-blue" disabled>
       <span class="spin" id="spn" style="display:none"></span>
-      ↻ Sync &amp; Refresh
+      Ã¢â€ Â» Sync &amp; Refresh
     </button>
   </div>
 </header>
 
 <main>
   <div class="stats">
-    <div class="stat"><div class="stat-lbl">Unread</div><div class="stat-val" id="sUnread">—</div><div class="stat-sub">emails</div></div>
-    <div class="stat"><div class="stat-lbl">Today</div><div class="stat-val" id="sToday">—</div><div class="stat-sub">calendar events</div></div>
-    <div class="stat"><div class="stat-lbl">Upcoming</div><div class="stat-val" id="sUp">—</div><div class="stat-sub">next 7 days</div></div>
+    <div class="stat"><div class="stat-lbl">Unread</div><div class="stat-val" id="sUnread">Ã¢â‚¬â€</div><div class="stat-sub">emails</div></div>
+    <div class="stat"><div class="stat-lbl">Today</div><div class="stat-val" id="sToday">Ã¢â‚¬â€</div><div class="stat-sub">calendar events</div></div>
+    <div class="stat"><div class="stat-lbl">Upcoming</div><div class="stat-val" id="sUp">Ã¢â‚¬â€</div><div class="stat-sub">next 7 days</div></div>
   </div>
 
   <!-- emails column -->
   <div>
     <div class="card">
       <div class="card-hdr">
-        <span class="card-title">📧 Important &amp; Unread <span class="badge badge-blue" id="cImp">0</span></span>
+        <span class="card-title">Ã°Å¸â€œÂ§ Important &amp; Unread <span class="badge badge-blue" id="cImp">0</span></span>
       </div>
-      <div id="impList"><div class="empty">Loading…</div></div>
+      <div id="impList"><div class="empty">LoadingÃ¢â‚¬Â¦</div></div>
     </div>
     <div class="card">
       <div class="card-hdr">
-        <span class="card-title">📰 Newsletters &amp; Marketing <span class="badge" id="cMkt">0</span></span>
+        <span class="card-title">Ã°Å¸â€œÂ° Newsletters &amp; Marketing <span class="badge" id="cMkt">0</span></span>
       </div>
-      <div id="mktList"><div class="empty">Loading…</div></div>
+      <div id="mktList"><div class="empty">LoadingÃ¢â‚¬Â¦</div></div>
     </div>
   </div>
 
   <!-- calendar column -->
   <div>
     <div class="card">
-      <div class="card-hdr"><span class="card-title">📅 Calendar</span></div>
-      <div id="calList"><div class="empty">Loading…</div></div>
+      <div class="card-hdr"><span class="card-title">Ã°Å¸â€œâ€¦ Calendar</span></div>
+      <div id="calList"><div class="empty">LoadingÃ¢â‚¬Â¦</div></div>
     </div>
   </div>
 </main>
@@ -720,7 +729,7 @@ main{max-width:1200px;margin:0 auto;padding:24px 20px;display:grid;grid-template
 const BASE = '${baseUrl}';
 const TOKEN = '716180e24c87de8b699efd32198adbd9';
 
-// ── colours for avatars ──────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ colours for avatars Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 const COLS=['#6366f1','#ec4899','#14b8a6','#f59e0b','#8b5cf6','#06b6d4','#10b981','#ef4444'];
 function aCol(s){let h=0;for(let i=0;i<s.length;i++)h=s.charCodeAt(i)+((h<<5)-h);return COLS[Math.abs(h)%COLS.length]}
 function aInit(n){if(!n)return'?';const p=n.split(' ').filter(Boolean);return p.length>=2?(p[0][0]+p[p.length-1][0]).toUpperCase():n.slice(0,2).toUpperCase()}
@@ -750,11 +759,11 @@ function eventHtml(e,today){
   <div class="time-blk"><div class="time-h">\${h}:\${mn}</div><div class="time-m">SAST</div></div>
   <div class="ev-body">
     <div class="ev-title">\${esc(e.subject||'(no title)')}</div>
-    <div class="ev-meta">\${e.location?'📍 '+esc(e.location)+' · ':''}\${today?'Today':esc(dFmt(e.start_at))}</div>
+    <div class="ev-meta">\${e.location?'Ã°Å¸â€œÂ '+esc(e.location)+' Ã‚Â· ':''}\${today?'Today':esc(dFmt(e.start_at))}</div>
     <span class="ev-tag \${today?'tag-today':'tag-up'}">\${today?'Today':'Upcoming'}</span>
   </div></div>\`}
 
-// ── API calls ────────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ API calls Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 async function apiBrief(){
   const r=await fetch(BASE+'/brief',{headers:{Authorization:'Bearer '+TOKEN}});
   if(!r.ok)throw new Error('brief '+r.status);
@@ -764,7 +773,7 @@ async function apiSync(){
   const r=await fetch(BASE+'/sync',{method:'POST',headers:{Authorization:'Bearer '+TOKEN}});
   return r.json()}
 
-// ── Render ───────────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Render Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 async function load(){
   busy(true);
   try{
@@ -794,12 +803,12 @@ async function load(){
     if(ue.length) cal+='<div class="sec-lbl">Coming up</div>'+ue.map(e=>eventHtml(e,false)).join('');
     document.getElementById('calList').innerHTML=cal||'<div class="empty">No upcoming events</div>';
 
-    toast('✓ Loaded',false);
+    toast('Ã¢Å“â€œ Loaded',false);
   }catch(e){toast('Error: '+e.message,true)}
   finally{busy(false)}}
 
 document.getElementById('syncBtn').addEventListener('click',async()=>{
-  busy(true);toast('Syncing from Gmail…',false);
+  busy(true);toast('Syncing from GmailÃ¢â‚¬Â¦',false);
   try{await apiSync();await load()}
   catch(e){toast('Sync failed: '+e.message,true);busy(false)}});
 

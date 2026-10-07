@@ -2,275 +2,187 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>OAuth 2.1 Flow Test - Morning Brief Connector</title>
+  <title>Morning Brief - Sync & Copy</title>
   <style>
+    * { box-sizing: border-box; }
     body {
-      font-family: system-ui, sans-serif;
-      max-width: 800px;
-      margin: 50px auto;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      max-width: 900px;
+      margin: 40px auto;
       padding: 20px;
       background: #f5f5f5;
     }
-    .card {
+    .container {
       background: white;
       padding: 30px;
-      border-radius: 8px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      margin-bottom: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
-    h1 { margin-top: 0; }
+    h1 { margin: 0 0 10px 0; color: #1f2937; }
+    p { color: #6b7280; margin: 0 0 20px 0; }
+    
+    .section { margin: 30px 0; }
+    .section-title { font-weight: bold; font-size: 16px; margin-bottom: 12px; color: #1f2937; }
+    
     button {
       background: #3b82f6;
       color: white;
-      padding: 12px 24px;
       border: none;
-      border-radius: 5px;
-      font-size: 16px;
-      cursor: pointer;
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-size: 15px;
       font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
     }
-    button:hover {
-      background: #2563eb;
+    button:hover:not(:disabled) { background: #2563eb; }
+    button:disabled { background: #d1d5db; cursor: not-allowed; }
+    
+    button.green {
+      background: #10b981;
     }
-    button:disabled {
-      background: #9ca3af;
-      cursor: not-allowed;
-    }
-    .output {
-      background: #f9fafb;
+    button.green:hover:not(:disabled) { background: #059669; }
+    
+    .status {
+      margin-top: 20px;
       padding: 15px;
-      border-radius: 5px;
-      font-family: monospace;
+      border-radius: 6px;
       font-size: 14px;
-      overflow-x: auto;
+    }
+    .status.success {
+      background: #d1fae5;
+      color: #065f46;
+      border: 1px solid #a7f3d0;
+    }
+    .status.error {
+      background: #fee2e2;
+      color: #7f1d1d;
+      border: 1px solid #fecaca;
+    }
+    
+    .json-box {
+      background: #1f2937;
+      color: #e5e7eb;
+      padding: 15px;
+      border-radius: 6px;
+      font-family: "Courier New", monospace;
+      font-size: 12px;
+      overflow: auto;
+      max-height: 600px;
       margin-top: 15px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
     }
-    .success {
-      background: #f0fdf4;
-      border-left: 4px solid #10b981;
-    }
-    .error {
-      background: #fef2f2;
-      border-left: 4px solid #ef4444;
-    }
-    .step {
-      margin: 15px 0;
-      padding: 10px;
-      border-radius: 5px;
-    }
-    .step-title {
+    
+    .copy-feedback {
+      color: #10b981;
       font-weight: bold;
-      margin-bottom: 10px;
+      font-size: 14px;
+      margin-left: 10px;
+      display: none;
     }
+    .copy-feedback.show { display: inline; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1>🌅 OAuth 2.1 Flow Test</h1>
-    <p>Test the OAuth 2.1 + PKCE flow for the Morning Brief Connector MCP server</p>
+  <div class="container">
+    <h1>📋 Morning Brief Sync</h1>
+    <p>Sync your email and calendar data for ChatGPT</p>
     
-    <div class="step">
-      <div class="step-title">Step 1: Start Authorization</div>
-      <p>Click the button below to start the OAuth 2.1 authorization flow with PKCE.</p>
-      <button id="startAuth">Start Authorization</button>
+    <div class="section">
+      <div class="section-title">1. Sync Data</div>
+      <button id="syncBtn">Sync & Refresh</button>
+      <div id="syncStatus"></div>
     </div>
-
-    <div class="step">
-      <div class="step-title">Step 2: After Authorization</div>
-      <p>After authorization, you'll be redirected back here with an authorization code.</p>
-      <button id="exchangeToken" disabled>Exchange Token</button>
+    
+    <div class="section">
+      <div class="section-title">2. Copy JSON</div>
+      <button id="copyBtn" class="green" disabled>Copy to Clipboard</button>
+      <span id="copyFeedback" class="copy-feedback">✓ Copied!</span>
+      <div id="jsonBox" class="json-box">Ready to sync</div>
     </div>
-
-    <div class="step">
-      <div class="step-title">Step 3: Call MCP Endpoint</div>
-      <p>Use the access token to call the MCP endpoint.</p>
-      <button id="callMcp" disabled>Call get_morning_brief</button>
-    </div>
-
-    <div id="output" class="output" style="display: none;"></div>
   </div>
 
   <script>
-    // Configuration
-    const BASE_URL = 'https://morning-brief-connector.reinier-olivier.workers.dev';
-    const REDIRECT_URI = window.location.origin + window.location.pathname;
-    const CLIENT_ID = REDIRECT_URI; // Using Client ID Metadata Document (CIMD) approach
-
-    let state = {
-      codeVerifier: null,
-      codeChallenge: null,
-      authState: null,
-      authorizationCode: null,
-      accessToken: null,
-      refreshToken: null
-    };
-
-    // Load state from localStorage if available
-    const saved = localStorage.getItem('oauthState');
-    if (saved) {
-      state = JSON.parse(saved);
-    }
-
+    const BASE = 'https://morning-brief-connector.reinier-olivier.workers.dev';
+    
+    let state = JSON.parse(localStorage.getItem('oauthState') || '{}');
+    
     function saveState() {
       localStorage.setItem('oauthState', JSON.stringify(state));
     }
-
-    function log(message, isError = false) {
-      const output = document.getElementById('output');
-      output.style.display = 'block';
-      output.className = 'output ' + (isError ? 'error' : 'success');
-      output.textContent = message;
-    }
-
-    // Generate random string for PKCE
-    function generateRandomString(length) {
-      const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
-      const values = crypto.getRandomValues(new Uint8Array(length));
-      return Array.from(values).map(x => possible[x % possible.length]).join('');
-    }
-
-    // Generate PKCE code challenge
-    async function generateCodeChallenge(codeVerifier) {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(codeVerifier);
-      const hash = await crypto.subtle.digest('SHA-256', data);
-      const base64 = btoa(String.fromCharCode(...new Uint8Array(hash)));
-      return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-    }
-
-    // Step 1: Start Authorization
-    document.getElementById('startAuth').addEventListener('click', async () => {
+    
+    document.getElementById('syncBtn').addEventListener('click', async () => {
       try {
-        // Generate PKCE parameters
-        state.codeVerifier = generateRandomString(128);
-        state.codeChallenge = await generateCodeChallenge(state.codeVerifier);
-        state.authState = generateRandomString(32);
-        saveState();
-
-        // Build authorization URL
-        const params = new URLSearchParams({
-          client_id: CLIENT_ID,
-          response_type: 'code',
-          redirect_uri: REDIRECT_URI,
-          scope: 'mcp:read offline_access',
-          state: state.authState,
-          code_challenge: state.codeChallenge,
-          code_challenge_method: 'S256'
-        });
-
-        const authUrl = `${BASE_URL}/authorize?${params}`;
-        log(`Starting authorization flow...\nRedirecting to: ${authUrl}`);
-        
-        // Redirect to authorization page
-        setTimeout(() => {
-          window.location.href = authUrl;
-        }, 1000);
-        
-      } catch (error) {
-        log(`Error: ${error.message}`, true);
-      }
-    });
-
-    // Step 2: Exchange authorization code for token
-    document.getElementById('exchangeToken').addEventListener('click', async () => {
-      try {
-        log('Exchanging authorization code for access token...');
-
-        const body = new URLSearchParams({
-          grant_type: 'authorization_code',
-          code: state.authorizationCode,
-          redirect_uri: REDIRECT_URI,
-          client_id: CLIENT_ID,
-          code_verifier: state.codeVerifier
-        });
-
-        const response = await fetch(`${BASE_URL}/oauth/token`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-          },
-          body: body.toString()
-        });
-
-        const data = await response.json();
-        
-        if (response.ok) {
-          state.accessToken = data.access_token;
-          state.refreshToken = data.refresh_token;
-          saveState();
-          
-          document.getElementById('callMcp').disabled = false;
-          log(`✅ Token received!\n\nAccess Token: ${data.access_token.substring(0, 20)}...\nRefresh Token: ${data.refresh_token ? data.refresh_token.substring(0, 20) + '...' : 'none'}\nExpires in: ${data.expires_in}s\nScopes: ${data.scope}`);
-        } else {
-          log(`❌ Token exchange failed:\n${JSON.stringify(data, null, 2)}`, true);
+        if (!state.accessToken) {
+          document.getElementById('syncStatus').innerHTML = '<div class="status error">No access token. Need to authorize first.</div>';
+          return;
         }
         
-      } catch (error) {
-        log(`Error: ${error.message}`, true);
-      }
-    });
-
-    // Step 3: Call MCP endpoint
-    document.getElementById('callMcp').addEventListener('click', async () => {
-      try {
-        log('Calling MCP endpoint: get_morning_brief...');
-
-        const response = await fetch(`${BASE_URL}/mcp`, {
+        document.getElementById('syncBtn').disabled = true;
+        document.getElementById('syncStatus').innerHTML = '';
+        
+        const resp = await fetch(BASE + '/mcp', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${state.accessToken}`
+            'Authorization': 'Bearer ' + state.accessToken
           },
           body: JSON.stringify({
             jsonrpc: '2.0',
             method: 'tools/call',
-            params: {
-              name: 'get_morning_brief',
-              arguments: {}
-            },
+            params: { name: 'get_morning_brief', arguments: {} },
             id: 1
           })
         });
-
-        const data = await response.json();
         
-        if (response.ok && !data.error) {
-          log(`✅ MCP call successful!\n\n${JSON.stringify(data, null, 2)}`);
+        const data = await resp.json();
+        document.getElementById('syncBtn').disabled = false;
+        
+        if (resp.ok && data.result) {
+          const briefText = data.result.content[0].text;
+          const briefJson = JSON.parse(briefText);
+          document.getElementById('jsonBox').textContent = JSON.stringify(briefJson, null, 2);
+          document.getElementById('copyBtn').disabled = false;
+          document.getElementById('syncStatus').innerHTML = '<div class="status success">✓ Synced successfully!</div>';
         } else {
-          log(`❌ MCP call failed:\n${JSON.stringify(data, null, 2)}`, true);
+          document.getElementById('syncStatus').innerHTML = '<div class="status error">Sync failed: ' + (data.error ? data.error.message : 'Unknown error') + '</div>';
         }
-        
-      } catch (error) {
-        log(`Error: ${error.message}`, true);
+      } catch (err) {
+        document.getElementById('syncBtn').disabled = false;
+        document.getElementById('syncStatus').innerHTML = '<div class="status error">Error: ' + err.message + '</div>';
       }
     });
-
-    // Check if we're returning from authorization
-    const urlParams = new URLSearchParams(window.location.search);
-    const code = urlParams.get('code');
-    const returnedState = urlParams.get('state');
-    const error = urlParams.get('error');
-    const errorDescription = urlParams.get('error_description');
-
-    if (error) {
-      log(`❌ Authorization error: ${error}\n${errorDescription || ''}`, true);
-    } else if (code && returnedState) {
-      if (returnedState !== state.authState) {
-        log('❌ State mismatch! Possible CSRF attack.', true);
-      } else {
-        state.authorizationCode = code;
-        saveState();
-        document.getElementById('exchangeToken').disabled = false;
-        log(`✅ Authorization code received!\n\nCode: ${code.substring(0, 20)}...`);
-        
-        // Clean URL
-        window.history.replaceState({}, document.title, window.location.pathname);
+    
+    document.getElementById('copyBtn').addEventListener('click', async () => {
+      try {
+        const text = document.getElementById('jsonBox').textContent;
+        await navigator.clipboard.writeText(text);
+        document.getElementById('copyFeedback').classList.add('show');
+        setTimeout(() => {
+          document.getElementById('copyFeedback').classList.remove('show');
+        }, 2000);
+      } catch (err) {
+        alert('Copy failed: ' + err.message);
       }
+    });
+    
+    // Check for auth code callback
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const returnedState = params.get('state');
+    
+    if (code && returnedState === state.authState) {
+      state.authorizationCode = code;
+      saveState();
+      window.history.replaceState({}, '', window.location.pathname);
+      alert('Authorization code received! Click "Exchange Token" to proceed.');
     }
-
-    // Enable "Call MCP" button if we already have a token
+    
+    // Enable copy button if token exists
     if (state.accessToken) {
-      document.getElementById('callMcp').disabled = false;
+      document.getElementById('copyBtn').disabled = false;
     }
   </script>
 </body>

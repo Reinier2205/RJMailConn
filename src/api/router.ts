@@ -1,4 +1,4 @@
-﻿/**
+/**
  * API Router - HTTP Request Routing and Authentication
  * 
  * Handles all HTTP routing, authentication, and endpoint management
@@ -13,6 +13,7 @@ import { DraftHandler } from "./drafts";
 import { CalendarEventHandler } from "./calendar";
 import { BriefHandler } from "./brief";
 import { AuthMiddleware } from "./auth-middleware";
+import { ActionsHandler } from "./actions";
 
 export interface AuthValidation {
   valid: boolean;
@@ -71,6 +72,10 @@ export class APIRouter {
         return await this.handleDraftEndpoints(request, corsHeaders);
       } else if (path === "/brief") {
         return await this.handleBriefEndpoint(request, corsHeaders);
+      } else if (path === "/actions/import") {
+        return await this.handleActionsImport(request, corsHeaders);
+      } else if (path === "/actions") {
+        return await this.handleActionsGet(request, corsHeaders);
       } else if (path === "/sync") {
         return await this.handleSyncEndpoint(request, corsHeaders);
       } else if (path === "/openapi.json") {
@@ -406,6 +411,56 @@ export class APIRouter {
     });
   }
 
+
+  async handleActionsGet(request: Request, corsHeaders: Record<string, string>): Promise<Response> {
+    return this.authMiddleware.requireAuth(request, corsHeaders, async () => {
+      if (request.method !== 'GET') return this.methodNotAllowed(corsHeaders);
+      try {
+        const data = await new ActionsHandler(this.env).getActionList();
+        return new Response(JSON.stringify(data), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      } catch (error) {
+        return this.handleError(error, corsHeaders, 'Failed to fetch action list');
+      }
+    });
+  }
+
+  async handleActionsImport(request: Request, corsHeaders: Record<string, string>): Promise<Response> {
+    return this.authMiddleware.requireAuth(request, corsHeaders, async () => {
+      if (request.method !== 'POST') return this.methodNotAllowed(corsHeaders);
+      try {
+        const raw = await request.json() as any;
+        // Normalise: accept full brief JSON, nested action_list, or standalone list
+        // ChatGPT sometimes changes field names - handle all known variants
+        let src = raw;
+        if (raw?.action_list) src = raw.action_list;           // full brief wrapper
+        // Normalise actions key: 'actions' or 'active_actions'
+        if (!src.actions && src.active_actions) src = { ...src, actions: src.active_actions };
+        // Normalise migration_rules key: 'migration_rules' or 'migration'
+        if (!src.migration_rules && src.migration) src = { ...src, migration_rules: src.migration };
+        // Normalise daily_brief_requirements: items may use 'migration_key' instead of 'key'
+        if (src.daily_brief_requirements) {
+          src = { ...src, daily_brief_requirements: src.daily_brief_requirements.map((r: any) => r.key ? r : { ...r, key: r.migration_key }) };
+        }
+        const payload = src;
+        if (!payload?.actions || !Array.isArray(payload.actions)) {
+          return new Response(
+            JSON.stringify({ error: 'Invalid payload: no actions array found. Expected field: actions or active_actions' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        const result = await new ActionsHandler(this.env).importActionList(payload);
+        return new Response(JSON.stringify(result), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      } catch (error) {
+        return this.handleError(error, corsHeaders, 'Failed to import action list');
+      }
+    });
+  }
   async handleSyncEndpoint(request: Request, corsHeaders: Record<string, string>): Promise<Response> {
     return this.authMiddleware.requireAuth(request, corsHeaders, async () => {
       if (request.method !== "POST") {
@@ -464,6 +519,7 @@ export class APIRouter {
 
   async handleOpenApiEndpoint(corsHeaders: Record<string, string>): Promise<Response> {
     // Serve the OpenAPI schema publicly - contains NO secrets or tokens
+    // @ts-ignore - URL unused for now but kept for future API docs
     const OPENAPI_URL = "https://raw.githubusercontent.com/reinier-olivier/RJMailConn/main/morning-brief-openapi.json";
     
     // We embed it directly so there's no external dependency

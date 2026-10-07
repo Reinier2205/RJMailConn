@@ -8,6 +8,7 @@
 import { Environment } from "../index";
 import { auditLog } from "../database/audit";
 import { SyncSource, SyncStatus } from "../database/models";
+import { ActionsHandler } from './actions';
 
 /**
  * Data source status for morning brief
@@ -84,6 +85,10 @@ export class BriefHandler {
       // Generate warnings based on sync status
       const warnings = this.generateDataWarnings(emailStatus, calendarStatus);
       
+      // Fetch master action list
+      const actionsHandler = new ActionsHandler(this.env);
+      const actionList = await actionsHandler.getActionList();
+
       const response: MorningBriefResponse = {
         generated_at: generatedAt,
         status: overallStatus,
@@ -93,8 +98,9 @@ export class BriefHandler {
         },
         emails,
         calendar,
-        warnings
-      };
+        warnings,
+        action_list: actionList
+      } as any;
       
       // Log brief generation
       await auditLog(this.env.DB, {

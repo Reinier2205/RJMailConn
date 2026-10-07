@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Morning Brief Connector - Main Entry Point
  *
  * Gmail + Google Calendar connector for Reinier's Morning Intelligence Brief.
@@ -60,6 +60,8 @@ export default {
       url.pathname === '/.well-known/oauth-protected-resource' ||
       url.pathname === '/.well-known/oauth-authorization-server' ||
       url.pathname === '/test-oauth' ||
+      url.pathname === '/getmymail' ||
+      url.pathname === '/export-json' ||
       url.pathname === '/test-oauth-client' ||
       url.pathname === '/test-oauth-client/.well-known/oauth-client' ||
       url.pathname === '/'

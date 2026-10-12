@@ -85,10 +85,13 @@ export class BriefHandler {
       // Generate warnings based on sync status
       const warnings = this.generateDataWarnings(emailStatus, calendarStatus);
       
-      // Fetch master action list
+      // Fetch master action list (returns full MasterBriefPayload)
       const actionsHandler = new ActionsHandler(this.env);
-      const actionList = await actionsHandler.getActionList();
+      const masterPayload = await actionsHandler.getActionList();
 
+      // Merge root-level master fields (system_prompt, financial_and_operational_state,
+      // standing_rules) into the response alongside action_list so the full canonical
+      // shape is preserved and the /getmymail page can find action_list.actions directly.
       const response: MorningBriefResponse = {
         generated_at: generatedAt,
         status: overallStatus,
@@ -99,7 +102,12 @@ export class BriefHandler {
         emails,
         calendar,
         warnings,
-        action_list: actionList
+        // Root-level master fields
+        ...(masterPayload.system_prompt !== undefined && { system_prompt: masterPayload.system_prompt }),
+        ...(masterPayload.financial_and_operational_state !== undefined && { financial_and_operational_state: masterPayload.financial_and_operational_state }),
+        ...(masterPayload.standing_rules !== undefined && { standing_rules: masterPayload.standing_rules }),
+        // action_list is the inner ActionListPayload (schema_version, actions, etc.)
+        action_list: masterPayload.action_list,
       } as any;
       
       // Log brief generation

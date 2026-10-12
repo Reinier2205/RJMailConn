@@ -182,22 +182,22 @@ export class HealthMonitor {
    */
   getVersionInfo(): any {
     return {
-      name: "Microsoft 365 Mail Connector",
+      name: "Morning Brief Connector",
       version: "1.0.0",
-      description: "Production-quality single-user connector for Morning Intelligence Brief",
+      description: "Gmail + Google Calendar connector for Reinier's Morning Intelligence Brief",
       capabilities: [
-        "OAuth 2.0 authentication",
-        "Email synchronization with checkpoints",
-        "Calendar synchronization",
+        "Google OAuth 2.0 authentication",
+        "Gmail synchronisation with checkpoints",
+        "Google Calendar synchronisation",
         "Draft email creation (no sending)",
         "Calendar event management",
-        "Morning brief generation",
+        "Morning brief generation with Master Action List",
         "Scheduled sync operations",
         "Comprehensive audit logging"
       ],
       endpoints: {
         auth: ["/auth/login", "/auth/callback", "/auth/logout"],
-        sync: ["/sync/email", "/sync/calendar", "/sync/all"],
+        sync: ["/sync"],
         email: ["/email/messages"],
         calendar: ["/calendar", "/calendar/events"],
         drafts: ["/drafts", "/drafts/reply"],

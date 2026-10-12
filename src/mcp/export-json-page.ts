@@ -104,7 +104,7 @@ textarea:focus{border-color:#d97706}
       Sync
     </button>
     <button id="copyBtn" class="btn btn-green" disabled>Copy JSON</button>
-    <button id="uploadToggle" class="btn btn-amber">Upload from ChatGPT</button>
+    <button id="uploadToggle" class="btn btn-amber">Upload from Gemini</button>
   </div>
 </header>
 
@@ -118,8 +118,8 @@ textarea:focus{border-color:#d97706}
   <!-- Upload panel (hidden by default) -->
   <div id="uploadPanel">
     <div class="upload-card">
-      <h3>Upload Updated Action List from ChatGPT</h3>
-      <p>Paste the full JSON from ChatGPT below. This replaces your current action list in D1.</p>
+      <h3>Upload Updated Action List from Gemini</h3>
+      <p>Paste the full JSON from Gemini below. This replaces your current action list in D1.</p>
       <textarea id="uploadJson" placeholder='{ "actions": [ ... ] }'></textarea>
       <div class="upload-actions">
         <button id="uploadBtn" class="btn btn-amber">Upload & Save</button>

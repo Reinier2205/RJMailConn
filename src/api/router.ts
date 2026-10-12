@@ -1,12 +1,11 @@
 /**
  * API Router - HTTP Request Routing and Authentication
- * 
+ *
  * Handles all HTTP routing, authentication, and endpoint management
- * for the Microsoft 365 Mail Connector API.
+ * for the Morning Brief Connector API (Gmail + Google Calendar).
  */
 
 import { Environment } from "../index";
-import { OAuthHandler } from "../auth/oauth";
 import { GoogleOAuthHandler } from "../google/auth";
 import { auditLog } from "../database/audit";
 import { DraftHandler } from "./drafts";
@@ -28,12 +27,12 @@ export interface AuthValidation {
  */
 export class APIRouter {
   private readonly env: Environment;
-  private readonly oauthHandler: OAuthHandler;
+  private readonly oauthHandler: GoogleOAuthHandler;
   private readonly authMiddleware: AuthMiddleware;
 
   constructor(env: Environment) {
     this.env = env;
-    this.oauthHandler = new OAuthHandler(env);
+    this.oauthHandler = new GoogleOAuthHandler(env);
     this.authMiddleware = new AuthMiddleware(env);
   }
 
@@ -155,7 +154,7 @@ export class APIRouter {
         details: { action: "login_initiated" }
       });
 
-      // Return HTTP 302 redirect to Microsoft login
+      // Return HTTP 302 redirect to Google login
       return new Response(null, { 
         status: 302, 
         headers: { 
@@ -432,26 +431,81 @@ export class APIRouter {
       if (request.method !== 'POST') return this.methodNotAllowed(corsHeaders);
       try {
         const raw = await request.json() as any;
-        // Normalise: accept full brief JSON, nested action_list, or standalone list
-        // ChatGPT sometimes changes field names - handle all known variants
+
+        // ── Extract metadata and unwrap action_list ──────────────────────────
+        // Handle all known shapes Gemini may produce:
+        //
+        //   Shape A (ideal root-level):
+        //     { system_prompt, financial_and_operational_state, standing_rules,
+        //       action_list: { schema_version, actions, ... } }
+        //
+        //   Shape B (Gemini double-nested):
+        //     { action_list: { system_prompt, financial_and_operational_state,
+        //         standing_rules, action_list: { schema_version, actions, ... } } }
+        //
+        //   Shape C (bare action_list object):
+        //     { actions, migration_rules, ... }
+
+        const rootMeta: {
+          system_prompt?: string;
+          financial_and_operational_state?: Record<string, unknown>;
+          standing_rules?: string[];
+        } = {};
+
+        // Walk up to two action_list levels, collecting metadata at each layer
         let src = raw;
-        if (raw?.action_list) src = raw.action_list;           // full brief wrapper
+
+        // First unwrap: if the payload has an action_list wrapper, step into it
+        // and capture any root-level metadata sitting alongside it
+        if (raw?.action_list) {
+          if (typeof raw.system_prompt === 'string') rootMeta.system_prompt = raw.system_prompt;
+          if (raw.financial_and_operational_state && typeof raw.financial_and_operational_state === 'object') {
+            rootMeta.financial_and_operational_state = raw.financial_and_operational_state;
+          }
+          if (Array.isArray(raw.standing_rules)) rootMeta.standing_rules = raw.standing_rules;
+
+          src = raw.action_list;
+        }
+
+        // Second unwrap: Gemini sometimes places system_prompt / financial state
+        // inside the first action_list wrapper, with a second action_list inside it
+        if (src?.action_list) {
+          if (typeof src.system_prompt === 'string' && !rootMeta.system_prompt) {
+            rootMeta.system_prompt = src.system_prompt;
+          }
+          if (src.financial_and_operational_state && typeof src.financial_and_operational_state === 'object' && !rootMeta.financial_and_operational_state) {
+            rootMeta.financial_and_operational_state = src.financial_and_operational_state;
+          }
+          if (Array.isArray(src.standing_rules) && !rootMeta.standing_rules) {
+            rootMeta.standing_rules = src.standing_rules;
+          }
+
+          src = src.action_list;
+        }
+
         // Normalise actions key: 'actions' or 'active_actions'
         if (!src.actions && src.active_actions) src = { ...src, actions: src.active_actions };
         // Normalise migration_rules key: 'migration_rules' or 'migration'
         if (!src.migration_rules && src.migration) src = { ...src, migration_rules: src.migration };
         // Normalise daily_brief_requirements: items may use 'migration_key' instead of 'key'
         if (src.daily_brief_requirements) {
-          src = { ...src, daily_brief_requirements: src.daily_brief_requirements.map((r: any) => r.key ? r : { ...r, key: r.migration_key }) };
+          src = {
+            ...src,
+            daily_brief_requirements: src.daily_brief_requirements.map(
+              (r: any) => r.key ? r : { ...r, key: r.migration_key },
+            ),
+          };
         }
+
         const payload = src;
         if (!payload?.actions || !Array.isArray(payload.actions)) {
           return new Response(
             JSON.stringify({ error: 'Invalid payload: no actions array found. Expected field: actions or active_actions' }),
-            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
           );
         }
-        const result = await new ActionsHandler(this.env).importActionList(payload);
+
+        const result = await new ActionsHandler(this.env).importActionList(payload, rootMeta);
         return new Response(JSON.stringify(result), {
           status: 200,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },

@@ -1,12 +1,11 @@
 /**
  * Token Storage Manager - Secure OAuth Token Management
- * 
- * Handles secure storage and retrieval of Microsoft OAuth tokens
- * using Cloudflare Workers KV or D1 for persistence.
+ *
+ * Handles secure storage and retrieval of Google OAuth tokens in D1.
  */
 
 import { Environment } from '../index';
-import { TokenSet } from './oauth';
+import { TokenSet } from '../google/auth';
 
 /**
  * Token Storage for OAuth Credentials

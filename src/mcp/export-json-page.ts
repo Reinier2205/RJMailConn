@@ -104,7 +104,7 @@ textarea:focus{border-color:#d97706}
       Sync
     </button>
     <button id="copyBtn" class="btn btn-green" disabled>Copy JSON</button>
-    <button id="uploadToggle" class="btn btn-amber">Upload from Gemini</button>
+    <button id="uploadToggle" class="btn btn-amber">New Upload</button>
   </div>
 </header>
 

@@ -110,6 +110,15 @@ export class SyncEngine {
           }
         }
 
+        // Remove emails that no longer exist in Gmail (deleted/archived by user).
+        // Only do this when pagination is complete so we don't delete messages
+        // that simply weren't included in a partial fetch.
+        let deleted = 0;
+        if (retrieval.paginationComplete && retrieval.items.length > 0) {
+          const liveIds = retrieval.items.map(m => m.id);
+          deleted = await this.deleteRemovedMessages(liveIds);
+        }
+
         const itemsProcessed = created + updated;
 
         const newCheckpoint: SyncCheckpoint = {
@@ -125,6 +134,8 @@ export class SyncEngine {
           retrieval.pagesChecked,
           validation.isComplete,
         );
+
+        console.log(`Email sync: +${created} new, ${updated} updated, ${deleted} removed`);
 
         return {
           source: 'email',
@@ -291,6 +302,40 @@ export class SyncEngine {
       .prepare('UPDATE email_messages SET last_seen_at = ? WHERE graph_message_id = ?')
       .bind(ts.toISOString(), gmailId)
       .run();
+  }
+
+  /**
+   * Delete email_messages rows whose Gmail IDs are no longer in the live set.
+   * Called only after a complete (paginated) sync so we never accidentally
+   * remove messages that were simply outside the current fetch window.
+   * D1 doesn't support NOT IN with large arrays natively, so we batch-delete
+   * in chunks using a temporary approach: delete all, then re-insert would be
+   * too heavy — instead we fetch stored IDs and diff in JS.
+   */
+  private async deleteRemovedMessages(liveGmailIds: string[]): Promise<number> {
+    // Fetch all stored Gmail IDs
+    const stored = await this.env.DB
+      .prepare('SELECT graph_message_id FROM email_messages')
+      .all();
+
+    const storedIds = (stored.results || []).map((r: any) => r.graph_message_id as string);
+    const liveSet = new Set(liveGmailIds);
+    const toDelete = storedIds.filter(id => !liveSet.has(id));
+
+    if (toDelete.length === 0) return 0;
+
+    // Delete in batches of 50 to stay within D1 limits
+    const BATCH = 50;
+    for (let i = 0; i < toDelete.length; i += BATCH) {
+      const chunk = toDelete.slice(i, i + BATCH);
+      const placeholders = chunk.map(() => '?').join(',');
+      await this.env.DB
+        .prepare(`DELETE FROM email_messages WHERE graph_message_id IN (${placeholders})`)
+        .bind(...chunk)
+        .run();
+    }
+
+    return toDelete.length;
   }
 
   private async insertMessage(
